@@ -134,10 +134,13 @@ def create_predlabel(g_labels, image_shape):
     candicate_cls = np.zeros((batch_num, width, height, 9, 2))
     pass
 
-def create_gtlabel(g_labels, feat_stride=16):
+def create_gtlabel(model, g_labels, feat_stride=16):
+    """This Function is processed before network input
+    Number of Candicate Anchors is Feature Map width * heights
+    Number of Predicted Anchors is Batch Num * Feature Map Width * Heights * 9
     """
-    Number of Anchors is 128
-    """
+    width = network_width
+    height = network_height
     # shifts is the all candicate anchors(prediction of bounding boxes)
     # Not ROIs
     shift_x = np.arange(0, width) * self._feat_stride
@@ -145,6 +148,10 @@ def create_gtlabel(g_labels, feat_stride=16):
     shift_x, shift_y = np.meshgrid(shift_x, shift_y)
     shifts = np.vstack((shift_x.ravel(), shift_y.ravel(),
                         shift_x.ravel(), shift_y.ravel())).transpose()
+    K = shifts.shape[0] # width * height
+
+    # Predicted labels
+    A = # batch * width * height * 9
 
 def train_rpn(batch_size, image_dir, label_dir, epoch=101, label_type="txt", lr=0.01, \
                   vggpath="./vgg16.npy", use_batchnorm=False, activation=tf.nn.relu, \
