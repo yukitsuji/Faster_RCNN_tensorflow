@@ -109,6 +109,12 @@ ext_modules = [
         extra_compile_args={'gcc': ["-Wno-cpp", "-Wno-unused-function"]},
 	include_dirs = [numpy_include]
 	),
+    Extension(
+        "bool_anchors_inside_image",
+        ["bool_anchors_inside_image.pyx"],
+        extra_compile_args={'gcc': ["-Wno-cpp", "-Wno-unused-function"]},
+	include_dirs = [numpy_include]
+	),
     # Extension(
     #     "utils.cython_nms",
     #     ["utils/nms.pyx"],
