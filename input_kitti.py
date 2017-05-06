@@ -3,10 +3,8 @@
 
 import sys
 import os
-import rospy
 import numpy as np
 import cv2
-import pcl
 import glob
 import math
 from parse_xml import parseXML

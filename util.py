@@ -3,7 +3,6 @@
 import sys
 import glob
 import cv2
-import dlib
 import numpy as np
 # from vgg16 import vgg16
 from input_kitti import *

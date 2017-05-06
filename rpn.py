@@ -3,7 +3,6 @@
 import sys
 import glob
 import cv2
-import dlib
 import numpy as np
 # from vgg16 import vgg16
 from input_kitti import *
@@ -12,6 +11,10 @@ from parse_xml import parseXML
 from base_vgg16 import Vgg16
 import tensorflow as tf
 from network_util import *
+from bbox_overlap import bbox_overlaps
+from remove_extraboxes import remove_extraboxes
+from bool_anchors_inside_image import batch_inside_image
+from generate_anchors import generate_anchors
 # from utility.image.data_augmentation.flip import Flip
 sys.path.append("/Users/tsujiyuuki/env_python/code/my_code/Data_Augmentation")
 
@@ -161,135 +164,72 @@ def rpn_loss(rpn_cls, rpn_bbox, g_bbox_regression, true_index, false_index):
     return total_loss, cls_loss, bbox_loss
 
 
-def create_Labels_For_Loss(model, g_labels, feat_stride):
+def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 64), \
+                           scales=np.array([8, 16, 32]), ratios=[0.5, 0.8, 1], \
+                           image_size=(500, 1000)):
     """This Function is processed before network input
     Number of Candicate Anchors is Feature Map width * heights
     Number of Predicted Anchors is Batch Num * Feature Map Width * Heights * 9
 
-    1. Create candicate Bounding Box
-       centers / anchors -> candicate_anchors
-    2.
+import numpy as np
+from rpn import create_Labels_For_Loss
+gt_boxes = np.arange(1080).reshape(30,9, 4)*10
+gt_boxes[:, :, 2] += 100
+gt_boxes[:, :, 3] += 100
+# create_Labels_For_Loss(gt_boxes)
+candicate_anchors, true_index, false_index = create_Labels_For_Loss(gt_boxes)
+candicate_anchors[true_index==1][97]
     """
-    #TODO: width, height, batch_size
-    width = network_width
-    height = network_height
+    # import time
+    # func_start = time.time()
+    width = feature_shape[0]
+    height = feature_shape[1]
+    batch_size = gt_boxes.shape[0]
     # shifts is the all candicate anchors(prediction of bounding boxes)
-    # Not ROIs
-    center_x = np.arange(0, width) * self._feat_stride
-    center_y = np.arange(0, height) * self._feat_stride
+    center_x = np.arange(0, width) * feat_stride
+    center_y = np.arange(0, height) * feat_stride
     center_x, center_y = np.meshgrid(center_x, center_y)
     # Shape is [Batch, Width*Height, 4]
     centers = np.zeros((batch_size, width*height, 4))
     centers[:] = np.vstack((center_x.ravel(), center_y.ravel(),
                         center_x.ravel(), center_y.ravel())).transpose()
-
-    anchors = np.zeros((batch_size, 9, 4))
-    anchors = generate_anchors(scale=[8, 16, 32], ratio=[0.5, 1., 2.]) # Shape is [A, 4]
-    A = 9
+    A = scales.shape[0] * len(ratios)
     K = width * height # width * height
-    candicate_anchors = centers.reshape(batch_size, -1, 1, 4) + anchors # [Batch, K, A, 4]
-    """これ以降の流れとしては
-    1. imageの枠内に入るかのチェックをし、入っている場所のindexを取得
-    2. 入っている箇所についてbbox_overlapsをする
-    3. true_indexを調べる。今回の場合、各バッチで64個取得する
-    　　方法としては、まずIOUを調べる。次に、それを0.7以上を検出する。maxも調べる
-    　　64個以下になるようにランダムサンプリングする
-    4. false_indexを調べる。今回の場合、各バッチで64個取得する。もしtrue_indexの数が少ない場合、128になるよう調整する
-    　　IOUが0.3以下の中からRandom Samplingする
-    5. 正規化する
-    6. true_index, false_index, 正規化された値をreturnする
-    """
-    # shape is [K, A]
-    is_inside = inside_image(candicate_anchors[0], width, height)
-    # shape is [Batch, ?, 4]
-    candicate_anchors = candicate_anchors[:, is_inside==1]
+    anchors = np.zeros((batch_size, A, 4))
+    anchors = generate_anchors(scales=scales, ratios=ratios) # Shape is [A, 4]
 
-    labels = np.empty((len(is_inside, ), ), dtype=np.float64)
-    labels.fill(-1)
+    candicate_anchors = centers.reshape(batch_size, K, 1, 4) + anchors # [Batch, K, A, 4]
+
+    # shape is [B, K, A]
+    is_inside = batch_inside_image(candicate_anchors, image_size[0], image_size[1])
 
     # candicate_anchors: Shape is [Batch, K, A, 4]
     # gt_boxes: Shape is [Batch, G, 4]
-    # overlaps: Shape is [Batch, K, A, G]
-    candicate_anchors = candicate_anchors * is_inside
-    candicate_anchors.reshape(Batch_Size, width, height, A, 4)
-    overlaps = bbox_overlaps(
+    # true_index: Shape is [Batch, K, A]
+    # false_index: Shape is [Batch, K, A]
+    candicate_anchors, true_index, false_index, overlaps = bbox_overlaps(
         np.ascontiguousarray(candicate_anchors, dtype=np.float),
+        is_inside,
         np.ascontiguousarray(gt_boxes, dtype=np.float))
 
-    # lossで計算に入れるindexを正負ともに別々に取得し、渡せるようにする
-    #　渡す値は、、GtとPredそれぞれ、それぞれ、正規化後の値
-    # いま計算しているのが、GroundTruthのデータとなる
+    for i in range(batch_size):
+        true_where = np.where(true_index[i] == 1)
+        num_true = len(true_where[0])
+        if num_true > 64:
+            select = np.random.choice(num_true, num_true - 64, replace=False)
+            num_true = 64
+            true_where = remove_extraboxes(true_where[0], true_where[1], select)
+            true_index[i, true_where] = 0
 
-    argmax_overlaps = overlaps.argmax(axis=1)
-    max_overlaps = overlaps[np.arange(len(inds_inside)), argmax_overlaps]
-    gt_argmax_overlaps = overlaps.argmax(axis=0)
-    gt_max_overlaps = overlaps[gt_argmax_overlaps,
-                               np.arange(overlaps.shape[1])]
-    gt_argmax_overlaps = np.where(overlaps == gt_max_overlaps)[0]
+        false_where = np.where(false_index[i] == 1)
+        num_false = len(false_where[0])
+        select = np.random.choice(num_false, num_false - (128-num_true), replace=False)
+        batch = np.ones((select.shape[0]), dtype=np.int) * i
+        false_where = remove_extraboxes(false_where[0], false_where[1], select, batch)
+        false_index[false_where] = 0
 
-    # fg label: for each gt, anchor with highest overlap
-    labels[gt_argmax_overlaps] = 1
-
-    # fg label: above threshold IOU
-    labels[max_overlaps >= cfg.TRAIN.RPN_POSITIVE_OVERLAP] = 1
-
-
-    # subsample positive labels if we have too many
-    num_fg = int(cfg.TRAIN.RPN_FG_FRACTION * cfg.TRAIN.RPN_BATCHSIZE)
-    fg_inds = np.where(labels == 1)[0]
-    if len(fg_inds) > num_fg:
-        disable_inds = npr.choice(
-            fg_inds, size=(len(fg_inds) - num_fg), replace=False)
-        labels[disable_inds] = -1
-
-    # subsample negative labels if we have too many
-    num_bg = cfg.TRAIN.RPN_BATCHSIZE - np.sum(labels == 1)
-    bg_inds = np.where(labels == 0)[0]
-    if len(bg_inds) > num_bg:
-        disable_inds = npr.choice(
-            bg_inds, size=(len(bg_inds) - num_bg), replace=False)
-        labels[disable_inds] = -1
-        #print "was %s inds, disabling %s, now %s inds" % (
-            #len(bg_inds), len(disable_inds), np.sum(labels == 0))
-
-    bbox_targets = np.zeros((len(inds_inside), 4), dtype=np.float32)
-    bbox_targets = _compute_targets(anchors, gt_boxes[argmax_overlaps, :])
-
-    bbox_inside_weights = np.zeros((len(inds_inside), 4), dtype=np.float32)
-    bbox_inside_weights[labels == 1, :] = np.array(cfg.TRAIN.RPN_BBOX_INSIDE_WEIGHTS)
-
-    bbox_outside_weights = np.zeros((len(inds_inside), 4), dtype=np.float32)
-
-    # diff_bbox is the difference of bbox Regression
-    # Shape is [Batch, w/16, h/16, 9, 4]
-    diff_bbox = diff_bbox.reshape(-1, 4)
-    cls_map = cls_map.reshape(-1, 2)
-
-    # solid_anchors, diff_bbox Dtype = np.float64
-    proposal = create_proposal_from_pred(solid_anchors, diff_bbox)
-
-    # g_bbox_regression : [Batch, K, A, 4] -> [Batch, W, H, A, 4]
-    # true_index        : [Batch, K, A, 4] -> [Batch, W, H, A]
-    # False_index       : [Batch, K, A, 4] -> [Batch, W, H, A]
-    return
-
-    # centers = np.vstack((center_x.ravel(), center_y.ravel(),
-    #                     center_x.ravel(), center_y.ravel())).transpose()
-    # anchors[:] = generate_anchors(scale=[8, 16, 32], ratio=[0.5, 1., 2.]) # Shape is [Batch, A, 4]
-    # candicate_anchors = centers.reshape(-1, 1, 4) + anchors.reshape(1, -1, 4) # [Batch, K, A, 4]
-    # candicate_anchors = candicate_anchors.reshape(-1, 4) # (Batch_sie, K(W*H) * A(9), 4)
-    # is_inside = np.where(
-    #     (candicate_anchors[:, 0] >= 0) &
-    #     (candicate_anchors[:, 1] >= 0) &
-    #     (candicate_anchors[:, 2] < im_info[1]) &  # width
-    #     (candicate_anchors[:, 3] < im_info[0])    # height
-    # )
-    # # candicate_anchors: Shape is [anchors(W*H), 4]
-    # # gt_boxes: Shape is [Num of GT Bbox(9), 4]
-    # # overlaps: Shape is [Num of GT Bbox(9), Num of GT Bbox(W*H), 4]
-    # overlaps = bbox_overlaps(
-    #     np.ascontiguousarray(candicate_anchors, dtype=np.float),
-    #     np.ascontiguousarray(gt_boxes, dtype=np.float))
+    # print "time", time.time() - func_start
+    return candicate_anchors, true_index, false_index
 
 def create_ROIs_For_RCNN(model, g_labels, feat_stride=16):
     """This Function is processed before network input
