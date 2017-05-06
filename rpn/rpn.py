@@ -207,7 +207,7 @@ candicate_anchors[true_index==1][97]
     # gt_boxes: Shape is [Batch, G, 4]
     # true_index: Shape is [Batch, K, A]
     # false_index: Shape is [Batch, K, A]
-    candicate_anchors, true_index, false_index, overlaps = bbox_overlaps(
+    candicate_anchors, true_index, false_index = bbox_overlaps(
         np.ascontiguousarray(candicate_anchors, dtype=np.float),
         is_inside,
         np.ascontiguousarray(gt_boxes, dtype=np.float))
@@ -292,6 +292,9 @@ if __name__ == '__main__':
     image_dir = "/home/katou01/download/training/image_2/*.png"
     label_dir = "/home/katou01/download/training/label_2/*.txt"
     images, labels = get_ALL_Image(image_dir, label_dir)
+    create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 64), \
+                               scales=np.array([8, 16, 32]), ratios=[0.5, 0.8, 1], \
+                               image_size=(500, 1000)):
     print images.shape, labels.shape
     #
     # image = im.open("./test_images/test1.jpg")

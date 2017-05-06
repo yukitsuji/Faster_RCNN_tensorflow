@@ -22,22 +22,22 @@ def bbox_overlaps(
     gt_boxes: (Batch, G, 4) ndarray of float
     Returns
     -------
-    overlaps: (Batch_Size, K, A, G) ndarray of overlap between anchors and gt_boxes
     """
     cdef unsigned int Batch_Size = anchors.shape[0]
     cdef unsigned int K = anchors.shape[1]
     cdef unsigned int A = anchors.shape[2]
-    cdef unsigned int G = gt_boxes.shape[1]
-    cdef np.ndarray[DTYPE_t, ndim=4] overlaps = np.zeros((Batch_Size, K, A, G), dtype=DTYPE)
+    cdef unsigned int G
+    cdef np.ndarray[DTYPE_t, ndim=4] overlaps = np.zeros((Batch_Size, K, A, 10), dtype=DTYPE)
     cdef np.ndarray[DTYPE_int_t, ndim=3] true_index = np.zeros((Batch_Size, K, A), dtype=DTYPE_int)
     cdef np.ndarray[DTYPE_int_t, ndim=3] false_index = np.zeros((Batch_Size, K, A), dtype=DTYPE_int)
     cdef DTYPE_t iw, ih, box_area
     cdef DTYPE_t ua
     cdef DTYPE_t max_overlap
     cdef DTYPE_t ex_width, ex_height, ex_center_x, ex_center_y, gt_width, gt_height, gt_center_x, gt_center_y
-    cdef unsigned int k, a, b, g, max_k, max_a, max_g, inside_
+    cdef unsigned int k, a, b, g, max_k, max_a, max_g
 
     for b in range(Batch_Size):
+        G = gt_boxes[b].shape[0]
         for g in range(G):
             box_area = (
                 (gt_boxes[b, g, 2] - gt_boxes[b, g, 0] + 1) *
@@ -102,4 +102,4 @@ def bbox_overlaps(
                           anchors[b, k, a, 1] = (gt_center_y - ex_center_y) / (ex_height)
                           anchors[b, k, a, 2] = log(gt_width / (ex_width))
                           anchors[b, k, a, 3] = log(gt_height / (ex_height))
-    return anchors, true_index, false_index, overlaps
+    return anchors, true_index, false_index
