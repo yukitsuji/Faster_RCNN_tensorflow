@@ -2,6 +2,8 @@
 Implementation of Faster RCNN by Tensorflow (In development)  
 
 ・Complete  
+Load Images of KiTTI Object Detection Datasets  
+Preprocessing for Network Input  
 RPN(Region Proposal Network)  
 
 ・ToDO  
