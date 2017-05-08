@@ -5,7 +5,7 @@ import glob
 import cv2
 import numpy as np
 # from vgg16 import vgg16
-from input_kitti import *
+# from input_kitti import *
 from parse_xml import parseXML
 from bbox_transform import *
 from base_vgg16 import Vgg16

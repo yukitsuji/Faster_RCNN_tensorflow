@@ -8,7 +8,7 @@ import cv2
 import glob
 import math
 from parse_xml import parseXML
-from util import *
+from data_util import *
 import matplotlib.pyplot as plt
 
 def read_label_from_txt(label_path):
@@ -86,6 +86,8 @@ def get_ALL_Image(image_dir, label_dir):
         images     (list): ndarray Images of datasets.
         pred_bboxes(ndarray): rescaled bbox Label. Shapeis [Batch, ?, 4](x, y, w, h)
     """
+    import time
+    start = time.time()
     # 車が含まれている画像のみラベルと一緒に読み込む
     image_pathlist = 0 #load_for_detection(label_dir)
     dataset_img_list = [] # len(dataset_img_list) == Number of Datasets Images
@@ -98,7 +100,9 @@ def get_ALL_Image(image_dir, label_dir):
     label_pathlist.sort()
 
     for index, (image_path, label_path) in enumerate(zip(image_pathlist, label_pathlist)):
-        if index == 100:
+        if index < 64:
+            continue
+        if index == 128:
             break
         img = cv2.imread(image_path)
         label = read_label_from_txt(label_path)
@@ -108,4 +112,5 @@ def get_ALL_Image(image_dir, label_dir):
         dataset_img_list.append(img)
         g_bboxes.append(label)
 
+    print time.time() - start
     return np.array(dataset_img_list), np.array(g_bboxes)

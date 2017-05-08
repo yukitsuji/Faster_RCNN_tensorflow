@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 
 import sys
+sys.path.append("/home/katou01/code/Faster_RCNN_tensorflow")
+sys.path.append("/home/katou01/code/Faster_RCNN_tensorflow/util")
+sys.path.append("/home/katou01/code/Faster_RCNN_tensorflow/cython_util")
 import glob
 import cv2
 import numpy as np
 # from vgg16 import vgg16
 from input_kitti import *
-from util import *
+from data_util import *
 from parse_xml import parseXML
 from base_vgg16 import Vgg16
 import tensorflow as tf
@@ -16,7 +19,7 @@ from remove_extraboxes import remove_extraboxes
 from bool_anchors_inside_image import batch_inside_image
 from generate_anchors import generate_anchors
 # from utility.image.data_augmentation.flip import Flip
-sys.path.append("/Users/tsujiyuuki/env_python/code/my_code/Data_Augmentation")
+# sys.path.append("/Users/tsujiyuuki/env_python/code/my_code/Data_Augmentation")
 
 """
 ・collect dataset of cars
@@ -164,9 +167,9 @@ def rpn_loss(rpn_cls, rpn_bbox, g_bbox_regression, true_index, false_index):
     return total_loss, cls_loss, bbox_loss
 
 
-def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 64), \
+def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 19), \
                            scales=np.array([8, 16, 32]), ratios=[0.5, 0.8, 1], \
-                           image_size=(500, 1000)):
+                           image_size=(300, 1000)):
     """This Function is processed before network input
     Number of Candicate Anchors is Feature Map width * heights
     Number of Predicted Anchors is Batch Num * Feature Map Width * Heights * 9
@@ -180,8 +183,8 @@ gt_boxes[:, :, 3] += 100
 candicate_anchors, true_index, false_index = create_Labels_For_Loss(gt_boxes)
 candicate_anchors[true_index==1][97]
     """
-    # import time
-    # func_start = time.time()
+    import time
+    func_start = time.time()
     width = feature_shape[0]
     height = feature_shape[1]
     batch_size = gt_boxes.shape[0]
@@ -201,16 +204,25 @@ candicate_anchors[true_index==1][97]
     candicate_anchors = centers.reshape(batch_size, K, 1, 4) + anchors # [Batch, K, A, 4]
 
     # shape is [B, K, A]
-    is_inside = batch_inside_image(candicate_anchors, image_size[0], image_size[1])
+    is_inside = batch_inside_image(candicate_anchors, image_size[1], image_size[0])
 
     # candicate_anchors: Shape is [Batch, K, A, 4]
     # gt_boxes: Shape is [Batch, G, 4]
     # true_index: Shape is [Batch, K, A]
     # false_index: Shape is [Batch, K, A]
+    # print gt_boxes.shape
+    # print gt_boxes
+    # print np.array(gt_boxes,dtype=np.float64).dtype
+    # print gt_boxes.dtype
+    print gt_boxes[0]
+#     box_area = (
+# (gt_boxes[b, g, 2] - gt_boxes[b, g, 0] + 1) *
+# (gt_boxes[b, g, 3] - gt_boxes[b, g, 1] + 1)
+# )
     candicate_anchors, true_index, false_index = bbox_overlaps(
         np.ascontiguousarray(candicate_anchors, dtype=np.float),
         is_inside,
-        np.ascontiguousarray(gt_boxes, dtype=np.float))
+        gt_boxes)
 
     for i in range(batch_size):
         true_where = np.where(true_index[i] == 1)
@@ -218,8 +230,9 @@ candicate_anchors[true_index==1][97]
         if num_true > 64:
             select = np.random.choice(num_true, num_true - 64, replace=False)
             num_true = 64
-            true_where = remove_extraboxes(true_where[0], true_where[1], select)
-            true_index[i, true_where] = 0
+            batch = np.ones((select.shape[0]), dtype=np.int) * i
+            true_where = remove_extraboxes(true_where[0], true_where[1], select, batch)
+            true_index[true_where] = 0
 
         false_where = np.where(false_index[i] == 1)
         num_false = len(false_where[0])
@@ -228,7 +241,7 @@ candicate_anchors[true_index==1][97]
         false_where = remove_extraboxes(false_where[0], false_where[1], select, batch)
         false_index[false_where] = 0
 
-    # print "time", time.time() - func_start
+    print "time", time.time() - func_start
     return candicate_anchors, true_index, false_index
 
 def create_ROIs_For_RCNN(model, g_labels, feat_stride=16):
@@ -291,11 +304,24 @@ if __name__ == '__main__':
 
     image_dir = "/home/katou01/download/training/image_2/*.png"
     label_dir = "/home/katou01/download/training/label_2/*.txt"
+    import time
+    start = time.time()
     images, labels = get_ALL_Image(image_dir, label_dir)
-    create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 64), \
-                               scales=np.array([8, 16, 32]), ratios=[0.5, 0.8, 1], \
-                               image_size=(500, 1000)):
-    print images.shape, labels.shape
+    print "labels"
+    print labels.shape
+    print "images"
+    print images.shape
+    candicate_anchors, true_index, false_index = create_Labels_For_Loss(labels, feat_stride=16, feature_shape=(64, 19), \
+                               scales=np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32]), ratios=[0.1, 0.2, 0.3, 0.5, 0.8, 1, 1.2], \
+                               image_size=(302, 1000))
+    print time.time() - start
+    print images[0].shape, labels.shape
+
+    print true_index[true_index==1].shape
+    print false_index[false_index==1].shape
+
+    print true_index[0, true_index[0]==1].shape
+    print false_index[false_index==1].shape
     #
     # image = im.open("./test_images/test1.jpg")
     # image = np.array(image, dtype=np.float32)

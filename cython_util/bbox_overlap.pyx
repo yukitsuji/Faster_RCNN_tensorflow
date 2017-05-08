@@ -13,7 +13,7 @@ ctypedef np.int_t DTYPE_int_t
 def bbox_overlaps(
         np.ndarray[DTYPE_t, ndim=4] anchors,
         np.ndarray[DTYPE_int_t, ndim=3] is_inside,
-        np.ndarray[DTYPE_t, ndim=3] gt_boxes):
+        object gt_boxes):
     """
     Parameters
     ----------
@@ -27,7 +27,7 @@ def bbox_overlaps(
     cdef unsigned int K = anchors.shape[1]
     cdef unsigned int A = anchors.shape[2]
     cdef unsigned int G
-    cdef np.ndarray[DTYPE_t, ndim=4] overlaps = np.zeros((Batch_Size, K, A, 10), dtype=DTYPE)
+    cdef np.ndarray[DTYPE_t, ndim=4] overlaps = np.zeros((Batch_Size, K, A, 15), dtype=DTYPE)
     cdef np.ndarray[DTYPE_int_t, ndim=3] true_index = np.zeros((Batch_Size, K, A), dtype=DTYPE_int)
     cdef np.ndarray[DTYPE_int_t, ndim=3] false_index = np.zeros((Batch_Size, K, A), dtype=DTYPE_int)
     cdef DTYPE_t iw, ih, box_area
@@ -40,8 +40,8 @@ def bbox_overlaps(
         G = gt_boxes[b].shape[0]
         for g in range(G):
             box_area = (
-                (gt_boxes[b, g, 2] - gt_boxes[b, g, 0] + 1) *
-                (gt_boxes[b, g, 3] - gt_boxes[b, g, 1] + 1)
+                (gt_boxes[b][g, 2] - gt_boxes[b][g, 0] + 1) *
+                (gt_boxes[b][g, 3] - gt_boxes[b][g, 1] + 1)
             )
             max_overlap = 0
             max_k = 0
@@ -50,13 +50,13 @@ def bbox_overlaps(
                   for a in range(A):
                       if is_inside[b, k, a] == 1:
                           iw = (
-                              min(anchors[b, k, a, 2], gt_boxes[b, g, 2]) -
-                              max(anchors[b, k, a, 0], gt_boxes[b, g, 0]) + 1
+                              min(anchors[b, k, a, 2], gt_boxes[b][g, 2]) -
+                              max(anchors[b, k, a, 0], gt_boxes[b][g, 0]) + 1
                           )
                           if iw > 0:
                               ih = (
-                                  min(anchors[b, k, a, 3], gt_boxes[b, g, 3]) -
-                                  max(anchors[b, k, a, 1], gt_boxes[b, g, 1]) + 1
+                                  min(anchors[b, k, a, 3], gt_boxes[b][g, 3]) -
+                                  max(anchors[b, k, a, 1], gt_boxes[b][g, 1]) + 1
                               )
                               if ih > 0:
                                   ua = float(
@@ -65,7 +65,7 @@ def bbox_overlaps(
                                       box_area - iw * ih
                                   )
                                   overlaps[b, k, a, g] = iw * ih / ua
-                                  if max_overlap < ((iw * ih / ua):
+                                  if max_overlap < ((iw * ih / ua)):
                                       max_overlap = iw * ih / ua
                                       max_k = k
                                       max_a = a
@@ -79,7 +79,7 @@ def bbox_overlaps(
                       max_g = 0
                       for g in range(G):
                           if overlaps[b, k, a, g] > 0:
-                              if max_overlap < (overlaps[b, k, a, g):
+                              if max_overlap < (overlaps[b, k, a, g]):
                                   max_overlap = overlaps[b, k, a, g]
                                   max_g = g
                       if max_overlap > 0.7:
@@ -93,10 +93,10 @@ def bbox_overlaps(
                           ex_height = anchors[b, k, a, 3] - anchors[b, k, a, 1] + 1
                           ex_center_x = anchors[b, k, a, 0] + ex_width / 2.0
                           ex_center_y = anchors[b, k, a, 1] + ex_height / 2.0
-                          gt_width = gt_boxes[b, max_g, 2] - gt_boxes[b, max_g, 0] + 1
-                          gt_height = gt_boxes[b, max_g, 3] - gt_boxes[b, max_g, 1] + 1
-                          gt_center_x = gt_boxes[b, max_g, 0] + gt_width / 2.0
-                          gt_center_y = gt_boxes[b, max_g, 1] + gt_height / 2.0
+                          gt_width = gt_boxes[b][max_g, 2] - gt_boxes[b][max_g, 0] + 1
+                          gt_height = gt_boxes[b][max_g, 3] - gt_boxes[b][max_g, 1] + 1
+                          gt_center_x = gt_boxes[b][max_g, 0] + gt_width / 2.0
+                          gt_center_y = gt_boxes[b][max_g, 1] + gt_height / 2.0
 
                           anchors[b, k, a, 0] = (gt_center_x - ex_center_x) / (ex_width)
                           anchors[b, k, a, 1] = (gt_center_y - ex_center_y) / (ex_height)
