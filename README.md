@@ -1,5 +1,11 @@
 # Fast_RCNN_tensorflow
-Implemention of Fast RCNN by Tensorflow  
+Implementation of Faster RCNN by Tensorflow (In development)  
+
+・Complete  
+RPN(Region Proposal Network)  
+
+・ToDO  
+Fast RCNN from RPN  
 
 # ROI Pooling
 ROI Pooling layer was implemented by this repository  
