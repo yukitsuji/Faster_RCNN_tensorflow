@@ -27,7 +27,7 @@ def bbox_overlaps(
     cdef unsigned int K = anchors.shape[1]
     cdef unsigned int A = anchors.shape[2]
     cdef unsigned int G
-    cdef np.ndarray[DTYPE_t, ndim=4] overlaps = np.zeros((Batch_Size, K, A, 15), dtype=DTYPE)
+    cdef np.ndarray[DTYPE_t, ndim=4] overlaps
     cdef np.ndarray[DTYPE_int_t, ndim=3] true_index = np.zeros((Batch_Size, K, A), dtype=DTYPE_int)
     cdef np.ndarray[DTYPE_int_t, ndim=3] false_index = np.zeros((Batch_Size, K, A), dtype=DTYPE_int)
     cdef DTYPE_t iw, ih, box_area
@@ -35,6 +35,13 @@ def bbox_overlaps(
     cdef DTYPE_t max_overlap
     cdef DTYPE_t ex_width, ex_height, ex_center_x, ex_center_y, gt_width, gt_height, gt_center_x, gt_center_y
     cdef unsigned int k, a, b, g, max_k, max_a, max_g
+
+    max_g = 0
+    for b in range(Batch_Size):
+        if max_g < gt_boxes[b].shape[0]:
+            max_g = gt_boxes[b].shape[0]
+
+    overlaps = np.zeros((Batch_Size, K, A, max_g))
 
     for b in range(Batch_Size):
         G = gt_boxes[b].shape[0]

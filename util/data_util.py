@@ -94,6 +94,7 @@ def get_Image_Roi_All(image_dir, label_dir, min_size):
     g_bboxes = create_bbox_regression_label(dataset_pred_bbox_list, g_bboxes)
     return np.array(dataset_img_list), np.array(dataset_pred_bbox_list), g_bboxes
 
+
 def select_inputs_from_datasets(dataset_img_list, dataset_pred_bbox_list, g_bboxes, batch_size):
     """
     # Args:

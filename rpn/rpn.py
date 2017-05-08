@@ -11,7 +11,7 @@ import numpy as np
 from input_kitti import *
 from data_util import *
 from parse_xml import parseXML
-from base_vgg16 import Vgg16
+from base_vgg16 import Vgg16 as Vgg
 import tensorflow as tf
 from network_util import *
 from bbox_overlap import bbox_overlaps
@@ -89,18 +89,21 @@ class RPN_ExtendedLayer(object):
         pass
 
     def build_model(self, input_layer, use_batchnorm=False, is_training=True, atrous=False, \
-                    rate=1, activation=tf.nn.relu, implement_atrous=False, lr_mult=1):
+                    rate=1, activation=tf.nn.relu, implement_atrous=False, lr_mult=1, anchors=1):
         self.rpn_conv = convBNLayer(input_layer, use_batchnorm, is_training, 512, 512, 3, 1, name="conv_rpn", activation=activation)
         # shape is [Batch, 2(bg/fg) * 9(anchors=3scale*3aspect ratio)]
         self.rpn_cls = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, 18, 1, 1, name="rpn_cls", activation=activation)
-        self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_cls_shape[0], rpn_cls_shape[1], rpn_cls_shape[2], 9, 2])
+        rpn_shape = self.rpn_cls.get_shape().as_list()
+        rpn_shape = tf.shape(self.rpn_cls)
+        self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_shape[0], rpn_shape[1], rpn_shape[2], 9, 2])
         self.rpn_cls = tf.nn.softmax(self.rpn_cls, dim=-1)
+        self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_shape[0], rpn_shape[1]*rpn_shape[2], anchors, 2])
         # shape is [Batch, 4(x, y, w, h) * 9(anchors=3scale*3aspect ratio)]
         self.rpn_bbox = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, 36, 1, 1, name="rpn_bbox", activation=activation)
-        self.rpn_bbox = tf.reshpae(self.rpn_bbox, [rpn_cls_shape[0], rpn_cls_shape[1], rpn_cls_shape[2], 9, 4])
+        self.rpn_bbox = tf.reshape(self.rpn_bbox, [rpn_shape[0], rpn_shape[1]*rpn_shape[2], anchors, 4])
 
 def rpn(sess, vggpath=None, image_shape=(300, 300), \
-              is_training=None, use_batchnorm=False, activation=tf.nn.relu):
+              is_training=None, use_batchnorm=False, activation=tf.nn.relu, anchors=9):
     images = tf.placeholder(tf.float32, [None, None, None, 3])
     phase_train = tf.placeholder(tf.bool, name="phase_traing") if is_training else None
 
@@ -110,7 +113,7 @@ def rpn(sess, vggpath=None, image_shape=(300, 300), \
     with tf.variable_scope("rpn_model") as scope:
         rpn_model = RPN_ExtendedLayer()
         rpn_model.build_model(vgg.conv5_3, use_batchnorm=use_batchnorm, \
-                                   is_training=phase_train, activation=activation)
+                                   is_training=phase_train, activation=activation, anchors=anchors)
 
     if is_training:
         initialized_var = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="rpn_model")
@@ -137,27 +140,28 @@ def smooth_L1(x):
     loss = tf.where(condition, l2, l1)
     return loss
 
-def rpn_loss(rpn_cls, rpn_bbox, g_bbox_regression, true_index, false_index):
+def rpn_loss(rpn_cls, rpn_bbox):
     """Calculate Class Loss and Bounding Regression Loss.
 
     # Args:
         obj_class: Prediction of object class. Shape is [ROIs*Batch_Size, 2]
         bbox_regression: Prediction of bounding box. Shape is [ROIs*Batch_Size, 4]
     """
-    rpn_cls = tf.reshape(rpn_cls, [-1, 2])
-    rpn_bbox = tf.reshape(rpn_bbox, [-1, 4])
-
-    true_obj_loss = -tf.reduce_sum(tf.multiply(rpn_cls[:, :, :, :, 0], true_index))
-    false_obj_loss = -tf.reduce_sum(tf.multiply(rpn_cls[:, :, :, :, 1], false_index))
+    rpn_shape = rpn_cls.get_shape().as_list()
+    g_bbox = tf.placeholder(tf.float32, [rpn_shape[0], rpn_shape[1], rpn_shape[2], 4])
+    true_index = tf.placeholder(tf.float32, [rpn_shape[0], rpn_shape[1], rpn_shape[2]])
+    false_index = tf.placeholder(tf.float32, [rpn_shape[0], rpn_shape[1], rpn_shape[2]])
+    true_obj_loss = -tf.reduce_sum(tf.multiply(rpn_cls[:, :, :, 0], true_index))
+    false_obj_loss = -tf.reduce_sum(tf.multiply(rpn_cls[:, :, :, 1], false_index))
     obj_loss = tf.add(true_obj_loss, false_obj_loss)
-    cls_loss = tf.div(smooth_L1(rpn_bbox, g_bbox_regression), true_obj_loss.get_shape().as_list()[0]) # L(cls) / N(cls) N=batch size
+    cls_loss = tf.div(obj_loss, 32) # L(cls) / N(cls) N=batch size
 
-    bbox_loss = smooth_L1(tf.subtract(rpn_bbox, g_bbox_regression))
-    bbox_loss = tf.reduce_sum(tf.multiply(bbox_loss, true_index))
-    bbox_loss = tf.div(bbox_loss, ANCHORS_NUM)# TODO
+    bbox_loss = smooth_L1(tf.subtract(rpn_bbox, g_bbox))
+    bbox_loss = tf.reduce_sum(tf.multiply(tf.reduce_sum(bbox_loss, 3), true_index))
+    bbox_loss = tf.div(bbox_loss, 32) # rpn_shape[1]*rpn_shape[2]
 
-    total_loss = tf.add(cls_loss, bbox_loss)
-    return total_loss, cls_loss, bbox_loss
+    total_loss = tf.add(cls_loss, tf.multiply(bbox_loss, 10))
+    return total_loss, cls_loss, bbox_loss, g_bbox, true_index, false_index
 
 
 def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 19), \
@@ -167,8 +171,6 @@ def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 19), \
     Number of Candicate Anchors is Feature Map width * heights
     Number of Predicted Anchors is Batch Num * Feature Map Width * Heights * 9
     """
-    import time
-    func_start = time.time()
     width = feature_shape[0]
     height = feature_shape[1]
     batch_size = gt_boxes.shape[0]
@@ -216,7 +218,6 @@ def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 19), \
         false_where = remove_extraboxes(false_where[0], false_where[1], select, batch)
         false_index[false_where] = 0
 
-    print "time", time.time() - func_start
     return candicate_anchors, true_index, false_index
 
 def create_ROIs_For_RCNN(model, g_labels, feat_stride=16):
@@ -248,25 +249,34 @@ def create_ROIs_For_RCNN(model, g_labels, feat_stride=16):
     # solid_anchors, diff_bbox Dtype = np.float64
     proposal = create_proposal_from_pred(solid_anchors, diff_bbox)
 
-def train_rpn(batch_size, image_dir, label_dir, epoch=101, label_type="txt", lr=0.01, \
-                  vggpath="./vgg16.npy", use_batchnorm=False, activation=tf.nn.relu, \
-                  min_size=1000):
+def train_rpn(batch_size, image_dir, label_dir, epoch=101, lr=0.01, feature_shape=(64, 19), \
+                  vggpath="../pretrain/vgg16.npy", use_batchnorm=False, activation=tf.nn.relu, \
+                  scales=np.array([5,  8, 12, 16, 32]), ratios=[0.3, 0.5, 0.8, 1]):
+    import time
     training_epochs = epoch
 
     with tf.Session() as sess:
         model, images, phase_train = rpn(sess, vggpath=vggpath, is_training=True, \
-                                         use_batchnorm=use_batchnorm, activation=activation)
-        total_loss, cls_loss, bbox_loss = rpn_loss(model)
+                                         use_batchnorm=use_batchnorm, activation=activation, anchors=scales.shape[0]*len(ratios))
+        total_loss, cls_loss, bbox_loss, g_bboxes, true_index, false_index = rpn_loss(model.rpn_cls, model.rpn_bbox)
         optimizer = create_optimizer(total_loss, lr=lr)
         init = tf.global_variables_initializer()
         sess.run(init)
 
-        input_images, cls_labels, bbox_labels = func(image_dir, label_dir, min_size=min_size)
-
+        image_pathlist, label_pathlist = get_pathlist(image_dir, label_dir)
         for epoch in range(training_epochs):
-            for (batch_x, batch_cls, batch_bbox) in zip(input_images, cls_labels, bbox_labels):
-                sess.run(optimizer, feed_dict={images:batch_x, g_cls:batch_cls, g_bbox:batch_bbox})
-                tl = sess.run(total_loss, feed_dict={images:batch_x, g_cls:batch_cls, g_bbox:batch_bbox})
+            for batch_images, batch_labels in generator__Image_and_label(image_pathlist, label_pathlist, batch_size=batch_size):
+                start = time.time()
+                candicate_anchors, batch_true_index, batch_false_index = create_Labels_For_Loss(batch_labels, feat_stride=16, feature_shape=feature_shape, \
+                                           scales=scales, ratios=ratios, image_size=(302, 1000))
+                print "batch time", time.time() - start
+                print candicate_anchors.shape
+                print batch_true_index.shape
+                print batch_false_index.shape
+                print batch_images.shape
+
+                sess.run(optimizer, feed_dict={images:batch_images, g_bboxes: candicate_anchors, true_index:batch_true_index, false_index:batch_false_index})
+                tl = sess.run(total_loss, feed_dict={images:batch_images, g_bboxes: candicate_anchors, true_index:batch_true_index, false_index:batch_false_index})
                 print("Epoch:", '%04d' % (epoch+1), "cost=", "{:.9f}".format(tl))
     print("Optimization Finished")
 
@@ -279,30 +289,23 @@ if __name__ == '__main__':
 
     image_dir = "/home/katou01/download/training/image_2/*.png"
     label_dir = "/home/katou01/download/training/label_2/*.txt"
-    import time
-    start = time.time()
-    images, labels = get_ALL_Image(image_dir, label_dir)
-    print "labels"
-    print labels.shape
-    print "images"
-    print images.shape
-    candicate_anchors, true_index, false_index = create_Labels_For_Loss(labels, feat_stride=16, feature_shape=(64, 19), \
-                               scales=np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32]), ratios=[0.1, 0.2, 0.3, 0.5, 0.8, 1, 1.2], \
-                               image_size=(302, 1000))
-    print time.time() - start
-    print images[0].shape, labels.shape
-
-    print true_index[true_index==1].shape
-    print false_index[false_index==1].shape
-
-    print true_index[0, true_index[0]==1].shape
-    print false_index[0, false_index[0]==1].shape
+    # import time
+    train_rpn(32, image_dir, label_dir, epoch=1, lr=0.01)
+    # image_pathlist, label_pathlist = get_pathlist(image_dir, label_dir)
+    # for images, labels in generator__Image_and_label(image_pathlist, label_pathlist, batch_size=32):
+    #     start = time.time()
+    #     # images, labels = get_ALL_Image(image_pathlist, label_pathlist)
+    #     candicate_anchors, true_index, false_index = create_Labels_For_Loss(labels, feat_stride=16, feature_shape=(64, 19), \
+    #                                scales=np.array([5,  8, 12, 16, 32]), ratios=[0.3, 0.5, 0.8, 1], \
+    #                                image_size=(302, 1000))
+    #     print "batch time", time.time() - start
+    #     print candicate_anchors.shape, true_index.shape, false_index.shape
+    # # images, labels = get_ALL_Image(image_pathlist, label_pathlist)
+    # candicate_anchors, true_index, false_index = create_Labels_For_Loss(labels, feat_stride=16, feature_shape=(64, 19), \
+    #                            scales=np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32]), ratios=[0.1, 0.2, 0.3, 0.5, 0.8, 1, 1.2], \
+    #                            image_size=(302, 1000))
+    # print images[0].shape, labels.shape
     #
-    # image = im.open("./test_images/test1.jpg")
-    # image = np.array(image, dtype=np.float32)
-    # new_image = image[np.newaxis, :]
-    # batch_image = np.vstack((new_image, new_image))
-    # batch_image = resize(batch_image, size=(300, 300))
     #
     # with tf.Session() as sess:
     #     model = ssd_model(sess, batch_image, activation=None, atrous=False, rate=1, implement_atrous=False)
