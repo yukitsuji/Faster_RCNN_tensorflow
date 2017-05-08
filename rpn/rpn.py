@@ -21,15 +21,8 @@ from generate_anchors import generate_anchors
 # from utility.image.data_augmentation.flip import Flip
 # sys.path.append("/Users/tsujiyuuki/env_python/code/my_code/Data_Augmentation")
 
-"""
-・collect dataset of cars
-・Preprocessing BBOX and Label for training
-・try roi_pooling layer
-・Extract ROI using mitmul tools
-・NMS
-"""
 
-"""Flow of Faster RCNN
+"""Flow of Fast RCNN
 ###############################################################################
 In this state, Create Input Images and ROI Labels
 
@@ -173,15 +166,6 @@ def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 19), \
     """This Function is processed before network input
     Number of Candicate Anchors is Feature Map width * heights
     Number of Predicted Anchors is Batch Num * Feature Map Width * Heights * 9
-
-import numpy as np
-from rpn import create_Labels_For_Loss
-gt_boxes = np.arange(1080).reshape(30,9, 4)*10
-gt_boxes[:, :, 2] += 100
-gt_boxes[:, :, 3] += 100
-# create_Labels_For_Loss(gt_boxes)
-candicate_anchors, true_index, false_index = create_Labels_For_Loss(gt_boxes)
-candicate_anchors[true_index==1][97]
     """
     import time
     func_start = time.time()
@@ -210,15 +194,6 @@ candicate_anchors[true_index==1][97]
     # gt_boxes: Shape is [Batch, G, 4]
     # true_index: Shape is [Batch, K, A]
     # false_index: Shape is [Batch, K, A]
-    # print gt_boxes.shape
-    # print gt_boxes
-    # print np.array(gt_boxes,dtype=np.float64).dtype
-    # print gt_boxes.dtype
-    print gt_boxes[0]
-#     box_area = (
-# (gt_boxes[b, g, 2] - gt_boxes[b, g, 0] + 1) *
-# (gt_boxes[b, g, 3] - gt_boxes[b, g, 1] + 1)
-# )
     candicate_anchors, true_index, false_index = bbox_overlaps(
         np.ascontiguousarray(candicate_anchors, dtype=np.float),
         is_inside,
@@ -321,7 +296,7 @@ if __name__ == '__main__':
     print false_index[false_index==1].shape
 
     print true_index[0, true_index[0]==1].shape
-    print false_index[false_index==1].shape
+    print false_index[0, false_index[0]==1].shape
     #
     # image = im.open("./test_images/test1.jpg")
     # image = np.array(image, dtype=np.float32)
