@@ -1,10 +1,10 @@
 # Fast_RCNN_tensorflow
 Implementation of Faster RCNN by Tensorflow (In development)  
 
-・Complete
+・Complete  
 RPN(Region Proposal Network)  
 
-・ToDO
+・ToDO  
 Fast RCNN from RPN  
 
 # ROI Pooling
