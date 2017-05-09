@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 
 import sys
-sys.path.append("/home/katou01/code/Faster_RCNN_tensorflow")
-sys.path.append("/home/katou01/code/Faster_RCNN_tensorflow/util")
-sys.path.append("/home/katou01/code/Faster_RCNN_tensorflow/cython_util")
+sys.path.append("../")
+sys.path.append("../util")
+sys.path.append("../cython_util")
 import glob
 import cv2
 import numpy as np
@@ -92,14 +92,14 @@ class RPN_ExtendedLayer(object):
                     rate=1, activation=tf.nn.relu, implement_atrous=False, lr_mult=1, anchors=1):
         self.rpn_conv = convBNLayer(input_layer, use_batchnorm, is_training, 512, 512, 3, 1, name="conv_rpn", activation=activation)
         # shape is [Batch, 2(bg/fg) * 9(anchors=3scale*3aspect ratio)]
-        self.rpn_cls = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, 18, 1, 1, name="rpn_cls", activation=activation)
+        self.rpn_cls = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, anchors*2, 1, 1, name="rpn_cls", activation=activation)
         rpn_shape = self.rpn_cls.get_shape().as_list()
         rpn_shape = tf.shape(self.rpn_cls)
-        self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_shape[0], rpn_shape[1], rpn_shape[2], 9, 2])
+        self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_shape[0], rpn_shape[1], rpn_shape[2], anchors, 2])
         self.rpn_cls = tf.nn.softmax(self.rpn_cls, dim=-1)
         self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_shape[0], rpn_shape[1]*rpn_shape[2], anchors, 2])
         # shape is [Batch, 4(x, y, w, h) * 9(anchors=3scale*3aspect ratio)]
-        self.rpn_bbox = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, 36, 1, 1, name="rpn_bbox", activation=activation)
+        self.rpn_bbox = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, anchors*4, 1, 1, name="rpn_bbox", activation=activation)
         self.rpn_bbox = tf.reshape(self.rpn_bbox, [rpn_shape[0], rpn_shape[1]*rpn_shape[2], anchors, 4])
 
 def rpn(sess, vggpath=None, image_shape=(300, 300), \
@@ -151,14 +151,16 @@ def rpn_loss(rpn_cls, rpn_bbox):
     g_bbox = tf.placeholder(tf.float32, [rpn_shape[0], rpn_shape[1], rpn_shape[2], 4])
     true_index = tf.placeholder(tf.float32, [rpn_shape[0], rpn_shape[1], rpn_shape[2]])
     false_index = tf.placeholder(tf.float32, [rpn_shape[0], rpn_shape[1], rpn_shape[2]])
-    true_obj_loss = -tf.reduce_sum(tf.multiply(rpn_cls[:, :, :, 0], true_index))
-    false_obj_loss = -tf.reduce_sum(tf.multiply(rpn_cls[:, :, :, 1], false_index))
+    elosion = 0.00001
+    true_obj_loss = -tf.reduce_sum(tf.multiply(tf.log(rpn_cls[:, :, :, 0]+elosion), true_index))
+    false_obj_loss = -tf.reduce_sum(tf.multiply(tf.log(rpn_cls[:, :, :, 1]+elosion), false_index))
     obj_loss = tf.add(true_obj_loss, false_obj_loss)
     cls_loss = tf.div(obj_loss, 32) # L(cls) / N(cls) N=batch size
 
     bbox_loss = smooth_L1(tf.subtract(rpn_bbox, g_bbox))
     bbox_loss = tf.reduce_sum(tf.multiply(tf.reduce_sum(bbox_loss, 3), true_index))
-    bbox_loss = tf.div(bbox_loss, 32) # rpn_shape[1]*rpn_shape[2]
+    bbox_loss = tf.div(bbox_loss, 1197) # rpn_shape[1]*rpn_shape[2]
+    # bbox_loss = bbox_loss / rpn_shape[1]
 
     total_loss = tf.add(cls_loss, tf.multiply(bbox_loss, 10))
     return total_loss, cls_loss, bbox_loss, g_bbox, true_index, false_index
@@ -175,8 +177,8 @@ def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 19), \
     height = feature_shape[1]
     batch_size = gt_boxes.shape[0]
     # shifts is the all candicate anchors(prediction of bounding boxes)
-    center_x = np.arange(0, width) * feat_stride
-    center_y = np.arange(0, height) * feat_stride
+    center_x = np.arange(0, height) * feat_stride
+    center_y = np.arange(0, width) * feat_stride
     center_x, center_y = np.meshgrid(center_x, center_y)
     # Shape is [Batch, Width*Height, 4]
     centers = np.zeros((batch_size, width*height, 4))
@@ -196,14 +198,25 @@ def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 19), \
     # gt_boxes: Shape is [Batch, G, 4]
     # true_index: Shape is [Batch, K, A]
     # false_index: Shape is [Batch, K, A]
+    print gt_boxes.shape
+    print gt_boxes[0]
+    print candicate_anchors[-1]
+    # print centers[-1]
+    # print anchors
+    print width, height
+    print is_inside[is_inside==1].shape
     candicate_anchors, true_index, false_index = bbox_overlaps(
         np.ascontiguousarray(candicate_anchors, dtype=np.float),
         is_inside,
         gt_boxes)
 
+    num = 0
     for i in range(batch_size):
         true_where = np.where(true_index[i] == 1)
         num_true = len(true_where[0])
+        print num_true
+        num += num_true
+
         if num_true > 64:
             select = np.random.choice(num_true, num_true - 64, replace=False)
             num_true = 64
@@ -218,6 +231,7 @@ def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 19), \
         false_where = remove_extraboxes(false_where[0], false_where[1], select, batch)
         false_index[false_where] = 0
 
+    print "num", num
     return candicate_anchors, true_index, false_index
 
 def create_ROIs_For_RCNN(model, g_labels, feat_stride=16):
@@ -251,7 +265,7 @@ def create_ROIs_For_RCNN(model, g_labels, feat_stride=16):
 
 def train_rpn(batch_size, image_dir, label_dir, epoch=101, lr=0.01, feature_shape=(64, 19), \
                   vggpath="../pretrain/vgg16.npy", use_batchnorm=False, activation=tf.nn.relu, \
-                  scales=np.array([5,  8, 12, 16, 32]), ratios=[0.3, 0.5, 0.8, 1]):
+                  scales=np.array([5, 8, 12, 16, 32]), ratios=[0.3, 0.5, 0.8, 1]):
     import time
     training_epochs = epoch
 
@@ -267,17 +281,21 @@ def train_rpn(batch_size, image_dir, label_dir, epoch=101, lr=0.01, feature_shap
         for epoch in range(training_epochs):
             for batch_images, batch_labels in generator__Image_and_label(image_pathlist, label_pathlist, batch_size=batch_size):
                 start = time.time()
-                candicate_anchors, batch_true_index, batch_false_index = create_Labels_For_Loss(batch_labels, feat_stride=16, feature_shape=feature_shape, \
-                                           scales=scales, ratios=ratios, image_size=(302, 1000))
+                candicate_anchors, batch_true_index, batch_false_index = create_Labels_For_Loss(batch_labels, feat_stride=16, feature_shape=(batch_images.shape[1]//16 +1, batch_images.shape[2]//16+1), \
+                                           scales=scales, ratios=ratios, image_size=batch_images.shape[1:3])
                 print "batch time", time.time() - start
                 print candicate_anchors.shape
-                print batch_true_index.shape
-                print batch_false_index.shape
                 print batch_images.shape
+                print batch_true_index[batch_true_index==1].shape
+                print batch_false_index[batch_false_index==1].shape
 
                 sess.run(optimizer, feed_dict={images:batch_images, g_bboxes: candicate_anchors, true_index:batch_true_index, false_index:batch_false_index})
                 tl = sess.run(total_loss, feed_dict={images:batch_images, g_bboxes: candicate_anchors, true_index:batch_true_index, false_index:batch_false_index})
-                print("Epoch:", '%04d' % (epoch+1), "cost=", "{:.9f}".format(tl))
+                cl = sess.run(cls_loss, feed_dict={images:batch_images, g_bboxes: candicate_anchors, true_index:batch_true_index, false_index:batch_false_index})
+                bl = sess.run(bbox_loss, feed_dict={images:batch_images, g_bboxes: candicate_anchors, true_index:batch_true_index, false_index:batch_false_index})
+                print("Epoch:", '%04d' % (epoch+1), "total loss=", "{:.9f}".format(tl))
+                print("Epoch:", '%04d' % (epoch+1), "closs loss=", "{:.9f}".format(cl))
+                print("Epoch:", '%04d' % (epoch+1), "bbox loss=", "{:.9f}".format(bl))
     print("Optimization Finished")
 
 if __name__ == '__main__':
@@ -287,10 +305,11 @@ if __name__ == '__main__':
     sys.path.append('/home/katou01/code/grid/DataAugmentation')
     # from resize import resize
 
-    image_dir = "/home/katou01/download/training/image_2/*.png"
-    label_dir = "/home/katou01/download/training/label_2/*.txt"
+    image_dir = "/home/tsuji/code/data/training/image_2/*.png"
+    label_dir = "/home/tsuji/code/data/training/label_2/*.txt"
     # import time
-    train_rpn(32, image_dir, label_dir, epoch=1, lr=0.01)
+    train_rpn(16, image_dir, label_dir, epoch=1, lr=0.01, \
+               scales=np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]), ratios=[0.4,  0.6])
     # image_pathlist, label_pathlist = get_pathlist(image_dir, label_dir)
     # for images, labels in generator__Image_and_label(image_pathlist, label_pathlist, batch_size=32):
     #     start = time.time()
@@ -304,10 +323,3 @@ if __name__ == '__main__':
     # candicate_anchors, true_index, false_index = create_Labels_For_Loss(labels, feat_stride=16, feature_shape=(64, 19), \
     #                            scales=np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32]), ratios=[0.1, 0.2, 0.3, 0.5, 0.8, 1, 1.2], \
     #                            image_size=(302, 1000))
-    # print images[0].shape, labels.shape
-    #
-    #
-    # with tf.Session() as sess:
-    #     model = ssd_model(sess, batch_image, activation=None, atrous=False, rate=1, implement_atrous=False)
-    #     print(vars(model))
-    #     # tf.summary.scalar('model', model)
