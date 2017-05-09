@@ -12,7 +12,7 @@ import numpy as np
 from input_kitti import *
 from data_util import *
 from parse_xml import parseXML
-from base_vgg16 import Vgg16 as Vgg
+from vgg16_vehicle import Vgg16 as Vgg
 import tensorflow as tf
 from network_util import *
 from bbox_overlap import bbox_overlaps
@@ -113,7 +113,7 @@ def rpn(sess, vggpath=None, image_shape=(300, 300), \
 
     with tf.variable_scope("rpn_model") as scope:
         rpn_model = RPN_ExtendedLayer()
-        rpn_model.build_model(vgg.conv5_3, use_batchnorm=use_batchnorm, \
+        rpn_model.build_model(vgg.conv4_3, use_batchnorm=use_batchnorm, \
                                    is_training=phase_train, activation=activation, anchors=anchors)
 
     if is_training:
@@ -230,8 +230,9 @@ def train_rpn(batch_size, image_dir, label_dir, epoch=101, lr=0.01, feature_shap
         for epoch in range(training_epochs):
             for batch_images, batch_labels in generator__Image_and_label(image_pathlist, label_pathlist, batch_size=batch_size):
                 start = time.time()
-                candicate_anchors, batch_true_index, batch_false_index = create_Labels_For_Loss(batch_labels, feat_stride=feature_stride, feature_shape=(batch_images.shape[1]//feature_stride +1, batch_images.shape[2]//feature_stride+1), \
-                                           scales=scales, ratios=ratios, image_size=batch_images.shape[1:3])
+                candicate_anchors, batch_true_index, batch_false_index = create_Labels_For_Loss(batch_labels, feat_stride=feature_stride, \
+                    feature_shape=(batch_images.shape[1]//feature_stride +1, batch_images.shape[2]//feature_stride), \
+                    scales=scales, ratios=ratios, image_size=batch_images.shape[1:3])
                 print "batch time", time.time() - start
                 print batch_true_index[batch_true_index==1].shape
                 print batch_false_index[batch_false_index==1].shape
@@ -255,8 +256,8 @@ if __name__ == '__main__':
     image_dir = "/home/katou01/download/training/image_2/*.png"
     label_dir = "/home/katou01/download/training/label_2/*.txt"
     # import time
-    train_rpn(16, image_dir, label_dir, epoch=20, lr=0.001, \
-               scales=np.array([2, 4, 6, 8, 10]), ratios=[0.4,  0.6, 0.8, 1.0])
+    train_rpn(4, image_dir, label_dir, epoch=20, lr=0.001, \
+               scales=np.array([6, 8, 10, 12, 14, 16, 20, 32]), ratios=[0.4,  0.6, 0.8, 1.0], feature_stride=8)
     # image_pathlist, label_pathlist = get_pathlist(image_dir, label_dir)
     # for images, labels in generator__Image_and_label(image_pathlist, label_pathlist, batch_size=32):
     #     start = time.time()

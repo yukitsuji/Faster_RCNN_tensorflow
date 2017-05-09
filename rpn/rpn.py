@@ -255,7 +255,7 @@ if __name__ == '__main__':
     image_dir = "/home/katou01/download/training/image_2/*.png"
     label_dir = "/home/katou01/download/training/label_2/*.txt"
     # import time
-    train_rpn(16, image_dir, label_dir, epoch=20, lr=0.001, \
+    train_rpn(6, image_dir, label_dir, epoch=20, lr=0.001, \
                scales=np.array([2, 4, 6, 8, 10]), ratios=[0.4,  0.6, 0.8, 1.0])
     # image_pathlist, label_pathlist = get_pathlist(image_dir, label_dir)
     # for images, labels in generator__Image_and_label(image_pathlist, label_pathlist, batch_size=32):

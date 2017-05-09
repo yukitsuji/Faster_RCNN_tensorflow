@@ -92,10 +92,10 @@ class Vgg16:
             return fc
 
     def get_conv_filter(self, name):
-        return tf.constant(self.data_dict[name][0], name="filter")
+        return tf.Variable(self.data_dict[name][0], name="filter")
 
     def get_bias(self, name):
-        return tf.constant(self.data_dict[name][1], name="biases")
+        return tf.Variable(self.data_dict[name][1], name="biases")
 
     def get_fc_weight(self, name):
-        return tf.constant(self.data_dict[name][0], name="weights")
+        return tf.Variable(self.data_dict[name][0], name="weights")
