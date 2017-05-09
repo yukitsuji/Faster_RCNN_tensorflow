@@ -93,14 +93,14 @@ class RPN_ExtendedLayer(object):
                     rate=1, activation=tf.nn.relu, implement_atrous=False, lr_mult=1, anchors=1):
         self.rpn_conv = convBNLayer(input_layer, use_batchnorm, is_training, 512, 512, 3, 1, name="conv_rpn", activation=activation)
         # shape is [Batch, 2(bg/fg) * 9(anchors=3scale*3aspect ratio)]
-        self.rpn_cls = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, anchors*2, 1, 1, name="rpn_cls", activation=activation)
+        self.rpn_cls = convBNLayer(self.rpn_conv, False, is_training, 512, anchors*2, 1, 1, name="rpn_cls", activation=None)
         rpn_shape = self.rpn_cls.get_shape().as_list()
         rpn_shape = tf.shape(self.rpn_cls)
         self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_shape[0], rpn_shape[1], rpn_shape[2], anchors, 2])
         self.rpn_cls = tf.nn.softmax(self.rpn_cls, dim=-1)
         self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_shape[0], rpn_shape[1]*rpn_shape[2], anchors, 2])
         # shape is [Batch, 4(x, y, w, h) * 9(anchors=3scale*3aspect ratio)]
-        self.rpn_bbox = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, anchors*4, 1, 1, name="rpn_bbox", activation=activation)
+        self.rpn_bbox = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, anchors*4, 1, 1, name="rpn_bbox", activation=None)
         self.rpn_bbox = tf.reshape(self.rpn_bbox, [rpn_shape[0], rpn_shape[1]*rpn_shape[2], anchors, 4])
 
 def rpn(sess, vggpath=None, image_shape=(300, 300), \
@@ -256,7 +256,7 @@ if __name__ == '__main__':
     image_dir = "/home/katou01/download/training/image_2/*.png"
     label_dir = "/home/katou01/download/training/label_2/*.txt"
     # import time
-    train_rpn(4, image_dir, label_dir, epoch=20, lr=0.001, \
+    train_rpn(4, image_dir, label_dir, epoch=20, lr=0.001, use_batchnorm=True, \
                scales=np.array([6, 8, 10, 12, 14, 16, 20, 32]), ratios=[0.4,  0.6, 0.8, 1.0], feature_stride=8)
     # image_pathlist, label_pathlist = get_pathlist(image_dir, label_dir)
     # for images, labels in generator__Image_and_label(image_pathlist, label_pathlist, batch_size=32):

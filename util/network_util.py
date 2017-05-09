@@ -49,14 +49,14 @@ def convBNLayer(input_layer, use_batchnorm, is_training, input_dim, output_dim, 
         conv = tf.nn.conv2d(input_layer, w, strides=[1, stride, stride, 1], padding=padding)
 
         if use_batchnorm:
-            bn = batch_norm(conv, is_training)
             if activation != None:
-                return activation(conv, name="activation")
+                conv = activation(conv, name="activation")
+            bn = batch_norm(conv, is_training)
             return bn
 
         b = tf.get_variable("bias", shape=[output_dim], initializer=tf.constant_initializer(0.0))
         bias = tf.nn.bias_add(conv, b)
-        if activation != None:
+        if activation is not None:
             return activation(bias, name="activation")
         return bias
 
