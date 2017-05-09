@@ -7,7 +7,7 @@ import time
 
 VGG_MEAN = [103.939, 116.779, 123.68]
 
-class Vgg16:
+class RPN:
     def __init__(self, vgg16_npy_path=None):
         if vgg16_npy_path is None:
             path = inspect.getfile(Vgg16)
@@ -26,22 +26,13 @@ class Vgg16:
         """
         start_time = time.time()
         print("build model started")
-        # rgb_scaled = rgb * 1.0
 
-        # Convert RGB to BGR
-        # red, green, blue = tf.split(axis=3, num_or_size_splits=3, value=rgb_scaled)
-        # bgr = tf.concat(axis=3, values=[
-        #     blue,
-        #     green,
-        #     red,
-        # ])
-
-        self.conv1_1 = self.conv_layer(bgr, "conv1_1", training=False)
-        self.conv1_2 = self.conv_layer(self.conv1_1, "conv1_2", training=False)
+        self.conv1_1 = self.conv_layer(bgr, "conv1_1")
+        self.conv1_2 = self.conv_layer(self.conv1_1, "conv1_2")
         self.pool1 = self.max_pool(self.conv1_2, 'pool1')
 
-        self.conv2_1 = self.conv_layer(self.pool1, "conv2_1", training=False)
-        self.conv2_2 = self.conv_layer(self.conv2_1, "conv2_2", training=False)
+        self.conv2_1 = self.conv_layer(self.pool1, "conv2_1")
+        self.conv2_2 = self.conv_layer(self.conv2_1, "conv2_2")
         self.pool2 = self.max_pool(self.conv2_2, 'pool2')
 
         self.conv3_1 = self.conv_layer(self.pool2, "conv3_1")
@@ -62,13 +53,13 @@ class Vgg16:
     def max_pool(self, bottom, name):
         return tf.nn.max_pool(bottom, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME', name=name)
 
-    def conv_layer(self, bottom, name, training=True):
+    def conv_layer(self, bottom, name):
         with tf.variable_scope(name):
-            filt = self.get_conv_filter(name, training=training)
+            filt = self.get_conv_filter(name)
 
             conv = tf.nn.conv2d(bottom, filt, [1, 1, 1, 1], padding='SAME')
 
-            conv_biases = self.get_bias(name, training=training)
+            conv_biases = self.get_bias(name)
             bias = tf.nn.bias_add(conv, conv_biases)
 
             relu = tf.nn.relu(bias)
@@ -91,11 +82,11 @@ class Vgg16:
 
             return fc
 
-    def get_conv_filter(self, name, training=True):
-        return tf.Variable(self.data_dict[name][0], name="filter", trainable=training)
+    def get_conv_filter(self, name):
+        return tf.Variable(self.data_dict[name][0], name="filter")
 
-    def get_bias(self, name, training=True):
-        return tf.Variable(self.data_dict[name][1], name="biases", trainable=training)
+    def get_bias(self, name):
+        return tf.Variable(self.data_dict[name][1], name="biases")
 
     def get_fc_weight(self, name):
         return tf.Variable(self.data_dict[name][0], name="weights")
