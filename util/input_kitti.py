@@ -111,10 +111,6 @@ def generator__Image_and_label(image_pathlist, label_pathlist, batch_size=32):
             dataset_img_list.append(img)
             g_bboxes.append(label)
         dataset_img_list = convert_imgslist_to_ndarray(dataset_img_list)
-        # print img.shape
-        # print im_scale
-        # g_bboxes = unique_bboxes(g_bboxes, im_scale, feature_scale=1./16)
-        print dataset_img_list.shape
         yield np.array(dataset_img_list), np.array(g_bboxes)
 
 def get_ALL_Image(image_dir, label_dir):
