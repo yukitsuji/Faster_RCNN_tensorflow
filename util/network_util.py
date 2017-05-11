@@ -60,9 +60,27 @@ def convBNLayer(input_layer, use_batchnorm, is_training, input_dim, output_dim, 
             return activation(bias, name="activation")
         return bias
 
-def maxpool2d(x, kernel=2, stride=1, name="", padding="SAME"):
+
+def get_fc_weight(self, name):
+return tf.Variable(self.data_dict[name][0], name="weights")
+
+def convLayer(input_layer, input_dim, output_dim, \
+                kernel_size, stride, activation=tf.nn.relu, padding="SAME", name=""):
+    with tf.variable_scope(name):
+        w = tf.get_variable("filter", \
+            shape=[kernel_size, kernel_size, input_dim, output_dim], initializer=tf.contrib.layers.xavier_initializer())
+
+        conv = tf.nn.conv2d(input_layer, w, strides=[1, stride, stride, 1], padding=padding)
+
+        b = tf.get_variable("biases", shape=[output_dim], initializer=tf.constant_initializer(0.0))
+        bias = tf.nn.bias_add(conv, b)
+        if activation is not None:
+            return activation(bias, name="activation")
+        return bias
+
+def maxpool2d(x, kernel=2, stride=2, name="", padding="SAME"):
     """define max pooling layer"""
-    with tf.variable_scope("pool" + name):
+    with tf.variable_scope(name):
         return tf.nn.max_pool(
             x,
             ksize = [1, kernel, kernel, 1],
