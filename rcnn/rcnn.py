@@ -87,7 +87,7 @@ class RPN_ExtendedLayer(object):
     def __init__(self):
         pass
 
-    def build_model(self, input_layer, use_batchnorm=False, is_training=True, activation=tf.nn.relu, lr_mult=1, anchors=1):
+    def build_model(self, input_layer, use_batchnorm=False, is_training=True, activation=tf.nn.relu, anchors=1):
         self.rpn_conv = convBNLayer(input_layer, use_batchnorm, is_training, 512, 512, 3, 1, name="conv_rpn", activation=activation)
         # shape is [Batch, 2(bg/fg) * 9(anchors=3scale*3aspect ratio)]
         self.rpn_cls = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, anchors*2, 1, 1, name="rpn_cls", activation=activation)
@@ -100,37 +100,110 @@ class RPN_ExtendedLayer(object):
         self.rpn_bbox = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, anchors*4, 1, 1, name="rpn_bbox", activation=activation)
         self.rpn_bbox = tf.reshape(self.rpn_bbox, [rpn_shape[0], rpn_shape[1]*rpn_shape[2]*anchors, 4])
 
-class RPN(object):
+class VGG(object):
     def __init__(self):
         pass
 
-    def build_model(self, input_layer, use_batchnorm=False, is_training=True, activation=tf.nn.relu, lr_mult=1, anchors=1):
-        self.layer1 = convBNLayer(images, False, is_training, )
+    def build_model(self, input_layer, activation=tf.nn.relu, anchors=1):
+        self.conv1_1 = convLayer(images, 3, 64, 3, 1, activation=activation, name="conv1_1")
+        self.conv1_2 = convLayer(self.conv1_1, 64, 64, 3, 1, activation=activation, name="conv1_2")
+        self.pool1 = maxpool2d(self.conv1_2, kernel=2, stride=2, name="pool1")
+
+        self.conv2_1 = convLayer(self.pool1, 64, 128, 3, 1, activation=activation, name="conv2_1")
+        self.conv2_2 = convLayer(self.conv2_1, 128, 128, 3, 1, activation=activation, name="conv2_2")
+        self.pool2 = maxpool2d(self.conv2_2, kernel=2, stride=2, name="pool2")
+
+        self.conv3_1 = convLayer(self.pool2, 128, 256, 3, 1, activation=activation, name="conv3_1")
+        self.conv3_2 = convLayer(self.conv3_1, 256, 256, 3, 1, activation=activation, name="conv3_2")
+        self.conv3_3 = convLayer(self.conv3_2, 256, 256, 3, 1, activation=activation, name="conv3_3")
+        self.pool3 = maxpool2d(self.conv3_3, kernel=2, stride=2, name="pool3")
+
+        self.conv4_1 = convLayer(self.pool2, 256, 512, 3, 1, activation=activation, name="conv4_1")
+        self.conv4_2 = convLayer(self.conv4_1, 512, 512, 3, 1, activation=activation, name="conv4_2")
+        self.conv4_3 = convLayer(self.conv4_2, 512, 512, 3, 1, activation=activation, name="conv4_3")
+        self.pool4 = maxpool2d(self.conv4_3, kernel=2, stride=2, name="pool4")
+
+        self.conv5_1 = convLayer(self.pool2, 512, 512, 3, 1, activation=activation, name="conv5_1")
+        self.conv5_2 = convLayer(self.conv5_1, 512, 512, 3, 1, activation=activation, name="conv5_2")
+        self.conv5_3 = convLayer(self.conv5_2, 512, 512, 3, 1, activation=activation, name="conv5_3")
 
 class FAST_RCNN(object):
     def __init__(self):
         pass
 
-    def build_model(self, input_layer, use_batchnorm=False, is_training=True, activation=tf.nn.relu, lr_mult=1, anchors=1):
-        self.layer1 = convBNLayer(images, False, is_training, )
+    def build_model(self, feature_map, rpn_model, use_batchnorm=False, is_training=True, activation=tf.nn.relu, anchors=1):
+        """
+        **rpn_modelから、実際の大きさまでスケールさせる**
+        1. 小さなbounding boxを排除(feature_stride * roi size?)
+        2. scoreから6000個を抽出
+        3. NMSをかけて、300個以下まで候補を絞る
+        ここまでが物体候補領域の抽出
+        ーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーー
+        4. gt_boxesと候補領域でoverlapsを計算する
+        overlapsが0.5以上ならGroundTruth, [0.1, 0.5)ならFalseであるとする　　* ここまでBatchでよい
+        ここの計算でReshapeされたROI, 正解Class Label, 正解Regression Label, そのindex番号の計算が行われる
+        5. rpn_modelをclass label[?]とregression label[?, 4]にReshapeし、indexで値を取ってくる
+
+        input
+        1. Pred class Label
+        2. Pred regression Label
+        3. GroundTruth class Label
+        4. GroundTruth regression Label
+
+        output
+        1. 候補領域の計算されたROI（batch number, x, y, w, h), 数は？
+        2. 候補領域の正解Class Label(batch number, 2) car or not
+        3. 候補領域の正解Regression Label(batch number, 4) x, y, w, h
+        　　これも事前に正規化しておく必要があります
+        4. Reshapeされたpred class label [?]
+        5. Reshapeされたpred regression label [?]
+
+        ここではBack Propは計算されない
+        indexのみ計算される  indexのOutputのShapeは、[?]
+        ROIs[index]で、これが次の層に伝搬される
+        """
+with tf.Session() as sess:
+    a = np.arange(10).reshape(5, 2)
+    b = tf.constant(a)
+    d = tf.nn.top_k(b[:, 0], k=2).indices
+    e = tf.nn.top_k(b[:, 0], k=2).values
+    f, g = sess.run([d, e])
+    print f
+    print g
+        rois = proposal_layer(feature_map, rpn_model)
+        # input_layer shape is [Batch, K, A, ]
+        self.roi_layer = roi_pooling(feature_map, rois, roi_size[0], roi_size[1])
+        # input_shape [num_of_rois, channel, roi size, roi size]
+        # tf.gather(roi_layer)
+
+        self.pool_5 = tf.reshape(roi_layer, [num_of_rois, roi_size[0]*roi_size[1]*512])
+        self.fc6 = fully_connected(pool_5, [roi_size[0]*roi_size[1]*512, 4096], name="fc6", is_training=is_training)
+        self.fc7 = fully_connected(fc6, [4096, 4096], name="fc7", is_training=is_training)
+        self.fc8 = fully_connected(self.fc7, [4096, 6], name="fc8")
+        # output shape [Batch, num_of_rois, 2]
+        self.obj_class = tf.nn.softmax(self.fc8[:, :, :2], dim=-1)
+        # output shape [Batch, num_of_rois, 8]
+        self.bbox_regression = self.fc8[:, :, 2:]
 
 def rpn(sess, vggpath=None, image_shape=(300, 300), \
               is_training=None, use_batchnorm=False, activation=tf.nn.relu, anchors=9):
     images = tf.placeholder(tf.float32, [None, None, None, 3])
     phase_train = tf.placeholder(tf.bool, name="phase_traing") if is_training else None
 
-    vgg = Vgg(vgg16_npy_path=vggpath)
+    vgg = VGG()
     vgg.build_model(images)
-    rpn = RPN_ExtendedLayer()
-    rpn.build_model(vgg.conv5_3, use_batchnorm=use_batchnorm, is_training=is_training, activation=activation, anchors=anchors)
+    with tf.variable_scope("rpn_model"):
+        rpn = RPN_ExtendedLayer()
+        rpn.build_model(vgg.conv5_3, use_batchnorm=use_batchnorm, is_training=is_training, activation=activation, anchors=anchors)
     return vgg.conv5_3, rpn, images, phase_train
 
-def fast_rcnn(sess, model, rois, roi_size=(7, 7), image_shape=(300, 300), \
+def fast_rcnn(sess, feature_map, rpn_model, roi_size=(7, 7), image_shape=(300, 300), \
               is_training=None, use_batchnorm=False, activation=tf.nn.relu, num_of_rois=128):
     """Model Definition of Fast RCNN
     In thesis, Roi Size is (7, 7), channel is 512
     """
     with tf.variable_scope("fast_rcnn"):
+        rcnn = FAST_RCNN(feature_map, rpn_model)
         # roi shape [Num of ROIs, X, Y, W, H]
         roi_layer = roi_pooling(model, rois, roi_size[0], roi_size[1])
         # input_shape [num_of_rois, channel, roi size, roi size]
