@@ -221,6 +221,7 @@ def train_rpn(batch_size, image_dir, label_dir, epoch=101, lr=0.01, feature_shap
     with tf.Session() as sess:
         model, images, phase_train = rpn(sess, vggpath=vggpath, is_training=True, \
                                          use_batchnorm=use_batchnorm, activation=activation, anchors=scales.shape[0]*len(ratios))
+        saver = tf.train.Saver()
         total_loss, cls_loss, bbox_loss, true_obj_loss, false_obj_loss, g_bboxes, true_index, false_index = rpn_loss(model.rpn_cls, model.rpn_bbox)
         optimizer = create_optimizer(total_loss, lr=lr)
         init = tf.global_variables_initializer()
@@ -244,6 +245,9 @@ def train_rpn(batch_size, image_dir, label_dir, epoch=101, lr=0.01, feature_shap
                 print("Epoch:", '%04d' % (epoch+1), "bbox loss=", "{:.9f}".format(bl))
                 print("Epoch:", '%04d' % (epoch+1), "true loss=", "{:.9f}".format(tol))
                 print("Epoch:", '%04d' % (epoch+1), "false loss=", "{:.9f}".format(fol))
+            if (epoch != 0) and ((epoch+1) % 10 == 0):
+                print "Save epoch " + str(epoch)
+                saver.save(sess, "rpn_model" + str(epoch) + ".ckpt")
     print("Optimization Finished")
 
 if __name__ == '__main__':
@@ -256,7 +260,7 @@ if __name__ == '__main__':
     image_dir = "/home/katou01/download/training/image_2/*.png"
     label_dir = "/home/katou01/download/training/label_2/*.txt"
     # import time
-    train_rpn(4, image_dir, label_dir, epoch=20, lr=0.001, use_batchnorm=True, \
+    train_rpn(4, image_dir, label_dir, epoch=41, lr=0.001, use_batchnorm=True, \
                scales=np.array([6, 8, 10, 12, 14, 16, 20, 32]), ratios=[0.4,  0.6, 0.8, 1.0], feature_stride=8)
     # image_pathlist, label_pathlist = get_pathlist(image_dir, label_dir)
     # for images, labels in generator__Image_and_label(image_pathlist, label_pathlist, batch_size=32):
