@@ -16,6 +16,17 @@ def fully_connected(input_layer, shape, name="", is_training=True, use_batchnorm
             fully = batch_norm(fully, is_training)
         return fully
 
+def vgg_fully(input_layer, shape, name="", activation=tf.nn.relu):
+    with tf.variable_scope(name):
+        kernel = tf.get_variable("weights", shape=shape, \
+            dtype=tf.float32, initializer=tf.truncated_normal_initializer(stddev=0.01))
+        b = tf.get_variable("biases", shape=[shape[1]], initializer=tf.constant_initializer(0.0))
+        fully = tf.matmul(input_layer, kernel)
+        fully = tf.nn.bias_add(fully, b)
+        if activation:
+            fully = activation(fully)
+        return fully
+
 def batch_norm(inputs, phase_train, decay=0.9, eps=1e-5):
     """Batch Normalization
 
