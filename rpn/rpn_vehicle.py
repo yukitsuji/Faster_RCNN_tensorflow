@@ -90,7 +90,7 @@ class RPN_ExtendedLayer(object):
         pass
 
     def build_model(self, input_layer, use_batchnorm=False, is_training=True, atrous=False, \
-                    rate=1, activation=tf.nn.relu, implement_atrous=False, lr_mult=1, anchors=1):
+                    rate=1, activation=tf.nn.relu, implement_atrous=False, anchors=1):
         self.rpn_conv = convBNLayer(input_layer, use_batchnorm, is_training, 512, 512, 3, 1, name="conv_rpn", activation=activation)
         # shape is [Batch, 2(bg/fg) * 9(anchors=3scale*3aspect ratio)]
         self.rpn_cls = convBNLayer(self.rpn_conv, False, is_training, 512, anchors*2, 1, 1, name="rpn_cls", activation=None)
@@ -111,7 +111,7 @@ def rpn(sess, vggpath=None, image_shape=(300, 300), \
     vgg = Vgg(vgg16_npy_path=vggpath)
     vgg.build_model(images)
 
-    with tf.variable_scope("rpn_model") as scope:
+    with tf.variable_scope("rpn_model"):
         rpn_model = RPN_ExtendedLayer()
         rpn_model.build_model(vgg.conv4_3, use_batchnorm=use_batchnorm, \
                                    is_training=phase_train, activation=activation, anchors=anchors)
