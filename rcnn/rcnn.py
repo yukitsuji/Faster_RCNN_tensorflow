@@ -127,11 +127,14 @@ class VGG(object):
         self.conv5_2 = convLayer(self.conv5_1, 512, 512, 3, 1, activation=activation, name="conv5_2")
         self.conv5_3 = convLayer(self.conv5_2, 512, 512, 3, 1, activation=activation, name="conv5_3")
 
-class FAST_RCNN(object):
-    def __init__(self):
-        pass
+def proposal_layer(feature_map, rpn_model, num_of_rois=num_of_rois):
+    return rois, gt_cls, gt_boxes
 
-    def build_model(self, feature_map, rpn_model, use_batchnorm=False, is_training=True, activation=tf.nn.relu, anchors=1):
+class FAST_RCNN(object):
+    def __init__(self, roi_size):
+        self.roi_size = roi_size
+
+    def build_model(self, feature_map, rois, rpn_model, activation=tf.nn.relu):
         """
         **rpn_modelから、実際の大きさまでスケールさせる**
         1. 小さなbounding boxを排除(feature_stride * roi size?)
@@ -162,28 +165,26 @@ class FAST_RCNN(object):
         indexのみ計算される  indexのOutputのShapeは、[?]
         ROIs[index]で、これが次の層に伝搬される
         """
-with tf.Session() as sess:
-    a = np.arange(10).reshape(5, 2)
-    b = tf.constant(a)
-    d = tf.nn.top_k(b[:, 0], k=2).indices
-    e = tf.nn.top_k(b[:, 0], k=2).values
-    f, g = sess.run([d, e])
-    print f
-    print g
-        rois = proposal_layer(feature_map, rpn_model)
+# with tf.Session() as sess:
+#     a = np.arange(10).reshape(5, 2)
+#     b = tf.constant(a)
+#     d = tf.nn.top_k(b[:, 0], k=2).indices
+#     e = tf.nn.top_k(b[:, 0], k=2).values
+#     f, g = sess.run([d, e])
+#     print f
+#     print g
         # input_layer shape is [Batch, K, A, ]
-        self.roi_layer = roi_pooling(feature_map, rois, roi_size[0], roi_size[1])
+        self.roi_layer = roi_pooling(feature_map, rois, self.roi_size[0], self.roi_size[1])
         # input_shape [num_of_rois, channel, roi size, roi size]
         # tf.gather(roi_layer)
-
-        self.pool_5 = tf.reshape(roi_layer, [num_of_rois, roi_size[0]*roi_size[1]*512])
-        self.fc6 = fully_connected(pool_5, [roi_size[0]*roi_size[1]*512, 4096], name="fc6", is_training=is_training)
-        self.fc7 = fully_connected(fc6, [4096, 4096], name="fc7", is_training=is_training)
-        self.fc8 = fully_connected(self.fc7, [4096, 6], name="fc8")
-        # output shape [Batch, num_of_rois, 2]
-        self.obj_class = tf.nn.softmax(self.fc8[:, :, :2], dim=-1)
-        # output shape [Batch, num_of_rois, 8]
-        self.bbox_regression = self.fc8[:, :, 2:]
+        self.pool_5 = tf.reshape(roi_layer, [-1, self.roi_size[0]*self.roi_size[1]*512])
+        self.fc6 = vgg_fully(self.pool_5, [self.roi_size[0]*self.roi_size[1]*512, 4096], name="fc6", is_training=is_training)
+        self.fc7 = vgg_fully(self.fc6, [4096, 4096], name="fc7")
+        self.fc8 = vgg_fully(self.fc7, [4096, 6], name="fc8")
+        # output shape [num_of_rois, 2]
+        self.obj_class = tf.nn.softmax(self.fc8[:, :2], dim=-1)
+        # output shape [num_of_rois, 8]
+        self.bbox_regression = self.fc8[:, 2:]
 
 def rpn(sess, vggpath=None, image_shape=(300, 300), \
               is_training=None, use_batchnorm=False, activation=tf.nn.relu, anchors=9):
@@ -195,46 +196,44 @@ def rpn(sess, vggpath=None, image_shape=(300, 300), \
     with tf.variable_scope("rpn_model"):
         rpn = RPN_ExtendedLayer()
         rpn.build_model(vgg.conv5_3, use_batchnorm=use_batchnorm, is_training=is_training, activation=activation, anchors=anchors)
+
+    if is_training:
+        rcnn_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="rpn_model")
+        sess.run(tf.variables_initializer(rcnn_vars))
     return vgg.conv5_3, rpn, images, phase_train
 
-def fast_rcnn(sess, feature_map, rpn_model, roi_size=(7, 7), image_shape=(300, 300), \
+def fast_rcnn(sess, feature_map, rpn_model, roi_size=(7, 7), \
               is_training=None, use_batchnorm=False, activation=tf.nn.relu, num_of_rois=128):
     """Model Definition of Fast RCNN
     In thesis, Roi Size is (7, 7), channel is 512
     """
     with tf.variable_scope("fast_rcnn"):
-        rcnn = FAST_RCNN(feature_map, rpn_model)
-        # roi shape [Num of ROIs, X, Y, W, H]
-        roi_layer = roi_pooling(model, rois, roi_size[0], roi_size[1])
-        # input_shape [num_of_rois, channel, roi size, roi size]
-        pool_5 = tf.reshape(roi_layer, [num_of_rois, roi_size[0]*roi_size[1]*512])
-        fc6 = fully_connected(pool_5, [roi_size[0]*roi_size[1]*512, 4096], name="fc6", is_training=is_training)
-        fc7 = fully_connected(fc6, [4096, 4096], name="fc7", is_training=is_training)
-        # output shape [num_of_rois, 2]
-        obj_class = tf.nn.softmax(fully_connected(fc7, [4096, 2], name="fc_class", activation=None, use_batchnorm=None), dim=-1)
-        # output shape [num_of_rois, 8]
-        bbox_regression = fully_connected(fc7, [4096, 8], name="fc_bbox", activation=None, use_batchnorm=None)
+        # py_func
+        rois, gt_cls, gt_boxes = proposal_layer(feature_map, rpn_model, num_of_rois=num_of_rois)
+        rcnn = FAST_RCNN(roi_size)
+        rcnn.build_model(feature_map, rois)
 
-def train_rpn(batch_size, image_dir, label_dir, epoch=101, lr=0.01, feature_shape=(64, 19), \
-                  vggpath="../pretrain/vgg16.npy", use_batchnorm=False, activation=tf.nn.relu, \
+    if is_training:
+        rcnn_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="fast_rcnn")
+        sess.run(tf.variables_initializer(rcnn_vars))
+
+    return rcnn, rcnn_vars
+
+def train_rcnn(batch_size, image_dir, label_dir, epoch=101, lr=0.01, feature_shape=(64, 19), \
+                  is_training=True, use_batchnorm=False, activation=tf.nn.relu, \
                   scales=np.array([5, 8, 12, 16, 32]), ratios=[0.3, 0.5, 0.8, 1], feature_stride=16):
     import time
     training_epochs = epoch
 
     with tf.Session() as sess:
-        vgg_featuremap, rpn_model, images, phase_train = rpn(sess, vggpath=vggpath, is_training=False, \
+        vgg_featuremap, rpn_model, images, phase_train = rpn(sess, vggpath=vggpath, is_training=False, roi_size=(7, 7), \
                                          use_batchnorm=use_batchnorm, activation=activation, anchors=scales.shape[0]*len(ratios))
         saver = tf.train.Saver()
         new_saver = tf.train.import_meta_graph("../rpn/rpn_model40.ckpt.meta")
         last_model = "../rpn/rpn_model40.ckpt"
         saver.restore(sess, last_model)
 
-        with tf.variable_scope("fast-rcnn"):
-            rcnn_model = fast_rcnn(vgg_featuremap, rpn_model, activation=activation)
-
-        if is_training:
-            rcnn_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="fast-rcnn")
-            sess.run(tf.variables_initializer(rcnn_vars))
+        rcnn_model, rcnn_vars = fast_rcnn(sess, vgg_featuremap, rpn_model, roi_size=roi_size, activation=activation)
 
         total_loss, cls_loss, bbox_loss, true_obj_loss, false_obj_loss, g_bboxes, true_index, false_index = rpn_loss(rcnn_model.rcnn_cls, rcnn_model.rcnn_bbox)
         # Only Training RCNN Layer
