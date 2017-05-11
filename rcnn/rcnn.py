@@ -127,8 +127,27 @@ class VGG(object):
         self.conv5_2 = convLayer(self.conv5_1, 512, 512, 3, 1, activation=activation, name="conv5_2")
         self.conv5_3 = convLayer(self.conv5_2, 512, 512, 3, 1, activation=activation, name="conv5_3")
 
-def proposal_layer(feature_map, rpn_model, num_of_rois=num_of_rois):
+def propose_for_rois(feature_map, rpn_model, num_of_rois=num_of_rois):
     return rois, gt_cls, gt_boxes
+
+def proposal_target_layer(self, feature_map, rpn_model, gt_labels, num_of_rois=num_of_rois, name=""):
+    """
+    gt_labels: Shape is [Batch, Num of GroundTruth Num, 4]
+    rois: Shape is [Num of ROIs, 5] 5 is [batch index, left, top, right, bottom]
+    gt_cls: Shape is [Num of ROIs, 2] 0 is GroundTruth, 1 is otherwise
+    gt_boxes: Shape is [Num of ROIs, 4] Value is Normalized by proposal target lay
+
+    Gradient will not deliver to RPN Layer
+    """
+    with tf.variable_scope(name):
+        rois, gt_cls, gt_boxes = tf.py_func(propose_for_rois, \
+            [feature_map, rpn_model.rpn_cls, rpn_model.rpn_bbox],[tf.int8,tf.float32,tf.float32])
+
+        # rois = tf.gather(tf.reshape(rpn_, [-1, 4]), roi_index)
+        rois = tf.convert_to_tensor(rois, name="rois")
+        gt_cls = tf.convert_to_tensor(gt_cls, name="gt_cls")
+        gt_boxes = tf.convert_to_tensor(gt_boxes, name="gt_boxes")
+        return rois, gt_cls, gt_boxes
 
 class FAST_RCNN(object):
     def __init__(self, roi_size):
@@ -165,18 +184,9 @@ class FAST_RCNN(object):
         indexのみ計算される  indexのOutputのShapeは、[?]
         ROIs[index]で、これが次の層に伝搬される
         """
-# with tf.Session() as sess:
-#     a = np.arange(10).reshape(5, 2)
-#     b = tf.constant(a)
-#     d = tf.nn.top_k(b[:, 0], k=2).indices
-#     e = tf.nn.top_k(b[:, 0], k=2).values
-#     f, g = sess.run([d, e])
-#     print f
-#     print g
         # input_layer shape is [Batch, K, A, ]
         self.roi_layer = roi_pooling(feature_map, rois, self.roi_size[0], self.roi_size[1])
         # input_shape [num_of_rois, channel, roi size, roi size]
-        # tf.gather(roi_layer)
         self.pool_5 = tf.reshape(roi_layer, [-1, self.roi_size[0]*self.roi_size[1]*512])
         self.fc6 = vgg_fully(self.pool_5, [self.roi_size[0]*self.roi_size[1]*512, 4096], name="fc6", is_training=is_training)
         self.fc7 = vgg_fully(self.fc6, [4096, 4096], name="fc7")
@@ -202,14 +212,17 @@ def rpn(sess, vggpath=None, image_shape=(300, 300), \
         sess.run(tf.variables_initializer(rcnn_vars))
     return vgg.conv5_3, rpn, images, phase_train
 
-def fast_rcnn(sess, feature_map, rpn_model, roi_size=(7, 7), \
+def fast_rcnn(sess, feature_map, rpn_model, gt_labels, roi_size=(7, 7), \
               is_training=None, use_batchnorm=False, activation=tf.nn.relu, num_of_rois=128):
     """Model Definition of Fast RCNN
     In thesis, Roi Size is (7, 7), channel is 512
     """
     with tf.variable_scope("fast_rcnn"):
-        # py_func
-        rois, gt_cls, gt_boxes = proposal_layer(feature_map, rpn_model, num_of_rois=num_of_rois)
+        # gt_labels: Shape is [Batch, Num of GroundTruth Num, 4]
+        # rois: Shape is [Num of ROIs, 5] 5 is [batch index, left, top, right, bottom]
+        # gt_cls: Shape is [Num of ROIs, 2] 0 is GroundTruth, 1 is otherwise
+        # gt_boxes: Shape is [Num of ROIs, 4] Value is Normalized by proposal target layer
+        rois, gt_cls, gt_boxes = proposal_target_layer(feature_map, rpn_model, gt_labels, num_of_rois=num_of_rois)
         rcnn = FAST_RCNN(roi_size)
         rcnn.build_model(feature_map, rois)
 
