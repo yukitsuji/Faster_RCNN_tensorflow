@@ -110,8 +110,8 @@ ext_modules = [
         include_dirs = [numpy_include]
     ),
     Extension(
-        "proposal_for_train",
-        ["proposal_for_train.pyx"],
+        "bbox_transform_inv",
+        ["bbox_transform_inv.pyx"],
         extra_compile_args={'gcc': ["-Wno-cpp", "-Wno-unused-function"]},
         include_dirs = [numpy_include]
     ),
