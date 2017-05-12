@@ -1,18 +1,24 @@
 # -*- coding: utf-8 -*-
 
 import sys
+sys.path.append("../")
+sys.path.append("../util")
+sys.path.append("../cython_util")
+sys.path.append("../pretrain")
 import glob
 import cv2
-import dlib
 import numpy as np
 # from vgg16 import vgg16
 from input_kitti import *
-from util import *
+from data_util import *
 from parse_xml import parseXML
-from base_vgg16 import Vgg16
+from vgg16_vehicle import Vgg16 as Vgg
 import tensorflow as tf
-# from utility.image.data_augmentation.flip import Flip
-sys.path.append("/Users/tsujiyuuki/env_python/code/my_code/Data_Augmentation")
+from network_util import *
+from bbox_overlap import bbox_overlaps
+from remove_extraboxes import remove_extraboxes
+from bool_anchors_inside_image import batch_inside_image
+from generate_anchors import generate_anchors
 
 """
 ・collect dataset of cars
@@ -95,7 +101,7 @@ class RPN_ExtendedLayer(object):
         rpn_shape = tf.shape(self.rpn_cls)
         self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_shape[0], rpn_shape[1], rpn_shape[2], anchors, 2])
         self.rpn_cls = tf.nn.softmax(self.rpn_cls, dim=-1)[:, :, :, :, 0]
-        self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_shape[0], rpn_shape[1]*rpn_shape[2]*anchors])
+        self.rpn_cls = tf.reshape(self.rpn_cls, [rpn_shape[0], rpn_shape[1]*rpn_shape[2]*anchors]) # for loss
         # shape is [Batch, 4(x, y, w, h) * 9(anchors=3scale*3aspect ratio)]
         self.rpn_bbox = convBNLayer(self.rpn_conv, use_batchnorm, is_training, 512, anchors*4, 1, 1, name="rpn_bbox", activation=activation)
         self.rpn_bbox = tf.reshape(self.rpn_bbox, [rpn_shape[0], rpn_shape[1]*rpn_shape[2]*anchors, 4])
@@ -127,34 +133,8 @@ class VGG(object):
         self.conv5_2 = convLayer(self.conv5_1, 512, 512, 3, 1, activation=activation, name="conv5_2")
         self.conv5_3 = convLayer(self.conv5_2, 512, 512, 3, 1, activation=activation, name="conv5_3")
 
-def propose_for_rois(feature_map, rpn_model, num_of_rois=num_of_rois):
-    return rois, gt_cls, gt_boxes
-
-def proposal_target_layer(self, feature_map, rpn_model, gt_labels, num_of_rois=num_of_rois, name=""):
+def propose_for_rois(rpn_cls, rpn_bbox, gt_labels, feat_stride, scales, ratios, feature_shape, image_size, num_of_rois=128):
     """
-    gt_labels: Shape is [Batch, Num of GroundTruth Num, 4]
-    rois: Shape is [Num of ROIs, 5] 5 is [batch index, left, top, right, bottom]
-    gt_cls: Shape is [Num of ROIs, 2] 0 is GroundTruth, 1 is otherwise
-    gt_boxes: Shape is [Num of ROIs, 4] Value is Normalized by proposal target lay
-
-    Gradient will not deliver to RPN Layer
-    """
-    with tf.variable_scope(name):
-        rois, gt_cls, gt_boxes = tf.py_func(propose_for_rois, \
-            [feature_map, rpn_model.rpn_cls, rpn_model.rpn_bbox],[tf.int8,tf.float32,tf.float32])
-
-        # rois = tf.gather(tf.reshape(rpn_, [-1, 4]), roi_index)
-        rois = tf.convert_to_tensor(rois, name="rois")
-        gt_cls = tf.convert_to_tensor(gt_cls, name="gt_cls")
-        gt_boxes = tf.convert_to_tensor(gt_boxes, name="gt_boxes")
-        return rois, gt_cls, gt_boxes
-
-class FAST_RCNN(object):
-    def __init__(self, roi_size):
-        self.roi_size = roi_size
-
-    def build_model(self, feature_map, rois, rpn_model, activation=tf.nn.relu):
-        """
         **rpn_modelから、実際の大きさまでスケールさせる**
         1. 小さなbounding boxを排除(feature_stride * roi size?)
         2. scoreから6000個を抽出
@@ -173,17 +153,127 @@ class FAST_RCNN(object):
         4. GroundTruth regression Label
 
         output
-        1. 候補領域の計算されたROI（batch number, x, y, w, h), 数は？
+        1. 候補領域の計算されたROI（batch number, x, y, w, h), 数は[?]
         2. 候補領域の正解Class Label(batch number, 2) car or not
         3. 候補領域の正解Regression Label(batch number, 4) x, y, w, h
         　　これも事前に正規化しておく必要があります
-        4. Reshapeされたpred class label [?]
-        5. Reshapeされたpred regression label [?]
 
         ここではBack Propは計算されない
         indexのみ計算される  indexのOutputのShapeは、[?]
         ROIs[index]で、これが次の層に伝搬される
-        """
+    """
+    image_size = images.shape[1:3]
+    width = feature_shape[0]
+    height = feature_shape[1]
+    batch_size = gt_labels.shape[0]
+    A = scales.shape[0] * len(ratios)
+    K = width * height
+
+    center_x = np.arange(0, height) * feat_stride
+    center_y = np.arange(0, width) * feat_stride
+    center_x, center_y = np.meshgrid(center_x, center_y)
+    centers = np.zeros((batch_size, width*height, 4))
+    centers[:] = np.vstack((center_x.ravel(), center_y.ravel(),
+                        center_x.ravel(), center_y.ravel())).transpose()
+    anchors = np.zeros((batch_size, A, 4))
+    anchors = generate_anchors(scales=scales, ratios=ratios) # Shape is [A, 4]
+    anchors = centers.reshape(batch_size, K, 1, 4) + anchors # [Batch, K, A, 4]
+    # gt_labels: Shape is [Batch, G, 4]
+    # rpn_bbox: Shape is [Batch, K*A, 4]
+    # rpn_cls: Shape is [Batch, K*A]
+    # rois: Shape is [Num of ROIs, 5] 5 is [batch index, left, top, right, bottom]
+    # gt_cls: Shape is [Num of ROIs, 2] 0 is GroundTruth, 1 is otherwise
+    # gt_boxes: Shape is [Num of ROIs, 4] Value is Normalized by proposal target lay
+
+    # Convert anchors into proposals via bbox transformations
+    # clip predicted boxes to image
+    # proposals: Shape is [Batch, K*A, 4]
+    # scores: Shape is [Batch, K*A]
+    # anchors: Shape is [Batch, K*A, 4]
+    anchors = bbox_transform_inv_clip(anchors, rpn_bbox, image_size[1], image_height[0])
+    for bs in range(batch_size):
+        keep = _filter_boxes(anchors[bs], min_size)
+        proposals = anchors[bs, keep]
+        scores = rpn_cls[bs, keep]
+        order = scores.ravel().argsort()[-6000:]
+        proposals = proposals[order]
+        scores = scores[order]
+        keep = nms(np.hstack((proposals, scores)), 0.7)
+        if post_nms_topN > 0:
+            keep = keep[:300]
+        proposals = proposals[keep, :]
+        scores = scores[keep]
+
+        # Sample ROIs
+        #ここから128枚(64枚: fg 16, bg 48)
+        computed_gt_boxes, true_index, false_index = bbox_overlaps(
+            proposals,
+            scores,
+            gt_labels)
+        # for i in range(batch_size):
+        true_where = np.where(true_index == 1)
+        num_true = len(true_where[0])
+
+        if num_true > 16:
+            select = np.random.choice(num_true, num_true - 16, replace=False)
+            num_true = 16
+            batch = np.ones((select.shape[0]), dtype=np.int) * bs
+            true_where = remove_extraboxes(true_where[0], select, batch)
+            true_index[true_where] = 0
+
+        false_where = np.where(false_index[i] == 1)
+        num_false = len(false_where[0])
+        select = np.random.choice(num_false, num_false - (64-num_true), replace=False)
+        batch = np.ones((select.shape[0]), dtype=np.int) * bs
+        false_where = remove_extraboxes(false_where[0], select, batch)
+        false_index[false_where] = 0
+        batch_inds.append(keep.shape[0])
+
+
+        true_index = None
+        false_index = None
+        final_index = None
+        # TODO Concatenate true_index and false_index
+        proposals = proposals[final_index]
+        gt_cls = true_index
+        gt_cls[bs, true_index, 0] = 1
+        gt_cls[bs, false_index, 1] = 1
+        gt_boxes[bs, true_index] = computed_gt_boxes[true_index]
+        rois[bs] = (proposals[true_index] / 4).astype(np.int32)
+    return rois, gt_cls, gt_boxes
+
+
+def _filter_boxes(boxes, min_size):
+    """Remove all boxes with any side smaller than min_size."""
+    ws = boxes[:, 2] - boxes[:, 0] + 1
+    hs = boxes[:, 3] - boxes[:, 1] + 1
+    keep = np.where((ws >= min_size) & (hs >= min_size))[0]
+    return keep
+
+def proposal_target_layer(self, feature_map, rpn_model, gt_labels, feat_stride, scales, ratios, feature_shape, images, num_of_rois=num_of_rois, feat_stride=16, name=""):
+    """
+    gt_labels: Shape is [Batch, Num of GroundTruth Num, 4]
+    rois: Shape is [Num of ROIs, 5] 5 is [batch index, left, top, right, bottom]
+    gt_cls: Shape is [Num of ROIs, 2] 0 is GroundTruth, 1 is otherwise
+    gt_boxes: Shape is [Num of ROIs, 4] Value is Normalized by proposal target layer
+
+    Gradient will not deliver to RPN Layer
+    """
+
+    with tf.variable_scope(name):
+        rois, gt_cls, gt_boxes = tf.py_func(propose_for_rois, \
+            [rpn_model.rpn_cls, rpn_model.rpn_bbox, gt_labels, feat_stride, scales, ratios, feature_shape, images],[tf.int8,tf.float32,tf.float32])
+
+        rois = tf.convert_to_tensor(rois, name="rois")
+        gt_cls = tf.convert_to_tensor(gt_cls, name="gt_cls")
+        gt_boxes = tf.convert_to_tensor(gt_boxes, name="gt_boxes")
+        return rois, gt_cls, gt_boxes
+
+class FAST_RCNN(object):
+    def __init__(self, roi_size):
+        self.roi_size = roi_size
+
+    def build_model(self, feature_map, rois, rpn_model, activation=tf.nn.relu):
         # input_layer shape is [Batch, K, A, ]
         self.roi_layer = roi_pooling(feature_map, rois, self.roi_size[0], self.roi_size[1])
         # input_shape [num_of_rois, channel, roi size, roi size]
@@ -366,23 +456,4 @@ def create_Labels_For_Loss(gt_boxes, feat_stride=16, feature_shape=(64, 19), \
     return candicate_anchors, true_index, false_index
 
 if __name__ == '__main__':
-    import sys
     import matplotlib.pyplot as plt
-    from PIL import Image as im
-    sys.path.append('/home/katou01/code/grid/DataAugmentation')
-    # from resize import resize
-
-    image_dir = "/home/katou01/download/training/image_2/*.png"
-    label_dir = "/home/katou01/download/training/label_2/*.txt"
-    get_Image_Roi_All(image_dir, label_dir, 80)
-    #
-    # image = im.open("./test_images/test1.jpg")
-    # image = np.array(image, dtype=np.float32)
-    # new_image = image[np.newaxis, :]
-    # batch_image = np.vstack((new_image, new_image))
-    # batch_image = resize(batch_image, size=(300, 300))
-    #
-    # with tf.Session() as sess:
-    #     model = ssd_model(sess, batch_image, activation=None, atrous=False, rate=1, implement_atrous=False)
-    #     print(vars(model))
-    #     # tf.summary.scalar('model', model)
