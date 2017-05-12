@@ -5,9 +5,10 @@ Implementation of Faster RCNN by Tensorflow (In development)
 Load Images of KiTTI Object Detection Datasets  
 Preprocessing for Network Input  
 RPN(Region Proposal Network)  
+Proposal Layer(Convert rpn to rois)  
 
 ・ToDO  
-Fast RCNN from RPN  
+Trainer for RCNN  
 
 # ROI Pooling
 ROI Pooling layer was implemented by this repository  
