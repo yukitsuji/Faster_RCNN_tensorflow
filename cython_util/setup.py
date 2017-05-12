@@ -104,6 +104,18 @@ class custom_build_ext(build_ext):
 
 ext_modules = [
     Extension(
+        "nms",
+        ["nms.pyx"],
+        extra_compile_args={'gcc': ["-Wno-cpp", "-Wno-unused-function"]},
+        include_dirs = [numpy_include]
+    ),
+    Extension(
+        "proposal_for_train",
+        ["proposal_for_train.pyx"],
+        extra_compile_args={'gcc': ["-Wno-cpp", "-Wno-unused-function"]},
+        include_dirs = [numpy_include]
+    ),
+    Extension(
         "bbox_overlap",
         ["bbox_overlap.pyx"],
         extra_compile_args={'gcc': ["-Wno-cpp", "-Wno-unused-function"]},
@@ -121,18 +133,6 @@ ext_modules = [
         extra_compile_args={'gcc': ["-Wno-cpp", "-Wno-unused-function"]},
 	include_dirs = [numpy_include]
 	),
-    # Extension(
-    #     "utils.cython_nms",
-    #     ["utils/nms.pyx"],
-    #     extra_compile_args={'gcc': ["-Wno-cpp", "-Wno-unused-function"]},
-    #     include_dirs = [numpy_include]
-    # ),
-    # Extension(
-    #     "nms.cpu_nms",
-    #     ["nms/cpu_nms.pyx"],
-    #     extra_compile_args={'gcc': ["-Wno-cpp", "-Wno-unused-function"]},
-    #     include_dirs = [numpy_include]
-    # )
 ]
 
 # if CUDA:
