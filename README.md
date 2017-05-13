@@ -10,6 +10,15 @@ Proposal Layer(Convert rpn to rois)
 ・ToDO  
 Trainer for RCNN  
 
+```
+# Prepare KiTTI Datasets
+http://www.cvlibs.net/datasets/kitti/eval_object.php
+
+# Training RPN  
+cd rpn
+python rpn.py
+```
+
 # ROI Pooling
 ROI Pooling layer was implemented by this repository  
 https://github.com/deepsense-io/roi-pooling
