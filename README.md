@@ -14,6 +14,10 @@ Trainer for RCNN
 # Prepare KiTTI Datasets
 http://www.cvlibs.net/datasets/kitti/eval_object.php
 
+# Compile Cython File
+cd cython_util
+./setup.sh
+
 # Training RPN  
 cd rpn
 python rpn.py
